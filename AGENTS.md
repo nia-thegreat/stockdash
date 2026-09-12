@@ -41,6 +41,13 @@ Base URL: `http://localhost:5001` (Vite proxies `/api` → `5001` in dev).
 | POST   | `/api/sales`      | (Planned) Log sale `{ part_id, quantity_sold }` — transactional stock decrement |
 | GET    | `/api/sales/recent` | (Planned) Sales aggregated by date, last 30 days          |
 
+## Frontend
+
+- Components live in `client/src/components/` (`StatsCards`, `ProductList`, `AddProductForm`, `SaleForm`, `SalesChart`).
+- Currently **mock data** in `client/src/data.js` — not yet wired to the API. `App.jsx` holds state and passes handlers down as props (`onAddPart`, `onLogSale`).
+- SalesChart is a dependency-free Tailwind bar chart — no Recharts installed.
+- Tailwind v3 (config-based), not v4.
+
 ## Gotchas
 
 - Data model is `parts` + `sales` (FK `sales.part_id → parts.id`) — **not** `products`/`product_id`; keep that naming everywhere.
