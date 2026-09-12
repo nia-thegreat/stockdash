@@ -4,24 +4,27 @@ import ProductList from './components/ProductList';
 import AddProductForm from './components/AddProductForm';
 import SaleForm from './components/SaleForm';
 import SalesChart from './components/SalesChart';
-import { recentSales as mockSales } from './data';
 
 const LOW_STOCK_THRESHOLD = 5;
 
 export default function App() {
   const [parts, setParts] = useState([]);
-  const [sales, setSales] = useState(mockSales);
+  const [sales, setSales] = useState([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  // Fetch all parts from GET /api/parts
-  async function fetchParts() {
+  // Fetch all parts + recent sales from the API
+  async function fetchData() {
     try {
       setLoading(true);
-      const res = await fetch('/api/parts');
-      if (!res.ok) throw new Error('Could not load parts');
-      setParts(await res.json());
+      const [partsRes, salesRes] = await Promise.all([
+        fetch('/api/parts'),
+        fetch('/api/sales/recent'),
+      ]);
+      if (!partsRes.ok || !salesRes.ok) throw new Error('Could not load data');
+      setParts(await partsRes.json());
+      setSales(await salesRes.json());
       setError('');
     } catch (err) {
       setError(err.message);
@@ -30,12 +33,12 @@ export default function App() {
     }
   }
 
-  // Load parts once when the app starts
+  // Load data once when the app starts
   useEffect(() => {
-    fetchParts();
+    fetchData();
   }, []);
 
-  // Send POST /api/parts, then refresh the list
+  // Send POST /api/parts, then refresh
   async function handleAddPart(newPart) {
     setError('');
     const res = await fetch('/api/parts', {
@@ -47,15 +50,22 @@ export default function App() {
     if (!res.ok) {
       throw new Error(data.error || 'Failed to add part');
     }
-    await fetchParts();
+    await fetchData();
   }
 
-  function handleLogSale(sale) {
-    // Still mock-only — sales API not implemented yet.
-    setSales((prev) => [
-      ...prev,
-      { date: '09/05', quantity_sold: sale.quantity_sold },
-    ]);
+  // Send POST /api/sales (server decrements stock), then refresh
+  async function handleLogSale(sale) {
+    setError('');
+    const res = await fetch('/api/sales', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(sale),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to log sale');
+    }
+    await fetchData();
   }
 
   const inventoryValue = parts.reduce(
@@ -137,7 +147,7 @@ export default function App() {
           </section>
 
           <section id="sales" className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <SalesChart data={sales} />
+            <SalesChart data={sales} loading={loading} />
             <div className="space-y-6">
               <AddProductForm onAddPart={handleAddPart} />
               <SaleForm parts={parts} onLogSale={handleLogSale} />

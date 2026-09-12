@@ -3,17 +3,29 @@ import { useState } from 'react';
 export default function SaleForm({ parts, onLogSale }) {
   const [partId, setPartId] = useState('');
   const [quantity, setQuantity] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [success, setSuccess] = useState(false);
+  const [error, setError] = useState('');
 
-  function handleSubmit(e) {
+  async function handleSubmit(e) {
     e.preventDefault();
+    setSaving(true);
+    setError('');
+    setSuccess(false);
 
-    onLogSale({
-      part_id: parseInt(partId, 10),
-      quantity_sold: parseInt(quantity, 10),
-    });
-
-    setPartId('');
-    setQuantity('');
+    try {
+      await onLogSale({
+        part_id: parseInt(partId, 10),
+        quantity_sold: parseInt(quantity, 10),
+      });
+      setPartId('');
+      setQuantity('');
+      setSuccess(true);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -52,10 +64,14 @@ export default function SaleForm({ parts, onLogSale }) {
 
         <button
           type="submit"
-          className="w-full bg-green-600 text-white text-sm font-medium py-2 rounded-md hover:bg-green-700 transition-colors"
+          disabled={saving}
+          className="w-full bg-green-600 text-white text-sm font-medium py-2 rounded-md hover:bg-green-700 transition-colors disabled:bg-green-400"
         >
-          Log Sale
+          {saving ? 'Logging...' : 'Log Sale'}
         </button>
+
+        {success && <p className="text-sm text-green-600">Sale logged</p>}
+        {error && <p className="text-sm text-red-600">{error}</p>}
       </form>
     </div>
   );

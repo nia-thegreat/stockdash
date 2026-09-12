@@ -113,6 +113,97 @@ app.put('/api/parts/:id', async (req, res) => {
   }
 });
 
+// Log a sale — transactional stock decrement
+app.post('/api/sales', async (req, res) => {
+  const { part_id, quantity_sold } = req.body;
+
+  // Validate input
+  if (!Number.isInteger(part_id) || part_id <= 0) {
+    return res.status(400).json({ error: 'part_id must be a positive integer' });
+  }
+  if (!Number.isInteger(quantity_sold) || quantity_sold <= 0) {
+    return res.status(400).json({ error: 'quantity_sold must be a positive integer' });
+  }
+
+  // Pull a dedicated connection so the transaction is isolated
+  const conn = await pool.getConnection();
+
+  try {
+    await conn.beginTransaction();
+
+    // Lock the part's row — other sales on the same part will wait here
+    const [parts] = await conn.query(
+      'SELECT * FROM parts WHERE id = ? FOR UPDATE',
+      [part_id]
+    );
+
+    if (parts.length === 0) {
+      await conn.rollback();
+      return res.status(404).json({ error: 'Part not found' });
+    }
+
+    const part = parts[0];
+
+    // Check stock BEFORE decrementing
+    if (part.stock_quantity < quantity_sold) {
+      await conn.rollback();
+      return res.status(400).json({
+        error: `Insufficient stock. Available: ${part.stock_quantity}`,
+      });
+    }
+
+    // total_amount = price × quantity (rounded to cents)
+    const total_amount = Math.round(Number(part.price) * quantity_sold * 100) / 100;
+
+    // Decrease stock
+    await conn.query(
+      'UPDATE parts SET stock_quantity = stock_quantity - ? WHERE id = ?',
+      [quantity_sold, part_id]
+    );
+
+    // Record the sale
+    const [result] = await conn.query(
+      'INSERT INTO sales (part_id, quantity_sold, total_amount) VALUES (?, ?, ?)',
+      [part_id, quantity_sold, total_amount]
+    );
+
+    await conn.commit();
+
+    const [rows] = await pool.query('SELECT * FROM sales WHERE id = ?', [result.insertId]);
+    res.status(201).json(rows[0]);
+  } catch (err) {
+    await conn.rollback();
+    res.status(500).json({ error: 'Database error' });
+  } finally {
+    conn.release();
+  }
+});
+
+// Recent sales — last 30 days, quantity sold per day (for the chart).
+// Generates a full 30-day date series so days with no sales return 0.
+app.get('/api/sales/recent', async (req, res) => {
+  try {
+    const [rows] = await pool.query(`
+      WITH RECURSIVE dates AS (
+        SELECT CURDATE() - INTERVAL 29 DAY AS day
+        UNION ALL
+        SELECT day + INTERVAL 1 DAY FROM dates WHERE day < CURDATE()
+      )
+      SELECT DATE_FORMAT(dates.day, '%Y-%m-%d') AS date,
+             COALESCE(SUM(sales.quantity_sold), 0) AS total_quantity
+      FROM dates
+      LEFT JOIN sales
+        ON sales.sold_at >= dates.day
+       AND sales.sold_at < dates.day + INTERVAL 1 DAY
+      GROUP BY dates.day
+      ORDER BY dates.day ASC
+    `);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });

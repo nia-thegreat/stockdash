@@ -38,20 +38,25 @@ Base URL: `http://localhost:5001` (Vite proxies `/api` → `5001` in dev).
 | GET    | `/api/parts`      | List all parts                                            |
 | POST   | `/api/parts`      | Add part `{ name, stock_quantity, price }`                |
 | PUT    | `/api/parts/:id`  | Partial update (any of name/stock_quantity/price)         |
-| POST   | `/api/sales`      | (Planned) Log sale `{ part_id, quantity_sold }` — transactional stock decrement |
-| GET    | `/api/sales/recent` | (Planned) Sales aggregated by date, last 30 days          |
+| POST   | `/api/sales`      | Log sale `{ part_id, quantity_sold }` — transactional stock decrement, 400 if insufficient, computes `total_amount` |
+| GET    | `/api/sales/recent` | Sales aggregated by date, last 30 days                  |
 
 ## Frontend
 
 - Components live in `client/src/components/` (`StatsCards`, `ProductList`, `AddProductForm`, `SaleForm`, `SalesChart`).
-- Currently **mock data** in `client/src/data.js` — not yet wired to the API. `App.jsx` holds state and passes handlers down as props (`onAddPart`, `onLogSale`).
-- SalesChart is a dependency-free Tailwind bar chart — no Recharts installed.
+- All data is wired to the API: `App.jsx` fetches `GET /api/parts` + `GET /api/sales/recent` in parallel on mount; `handleAddPart` does `POST /api/parts` then refetches. `handleLogSale` does `POST /api/sales` (server decrements stock), then refetches.
+- `SalesChart` uses **Recharts v3** (`BarChart`) — installed, not a dev-dependency.
+- `GET /api/sales/recent` returns a **zero-filled 30-day series** (recursive CTE) so days without sales render as zero-height bars; never returns fewer than 30 rows except on error.
+- Dashboard metrics (inventory value, total parts, low-stock count) are derived in `App.jsx` and rendered by `StatsCards`; only the parts list itself is fetched.
 - Tailwind v3 (config-based), not v4.
 
 ## Gotchas
 
 - Data model is `parts` + `sales` (FK `sales.part_id → parts.id`) — **not** `products`/`product_id`; keep that naming everywhere.
 - The `parts` update route uses `COALESCE(?, col)` so partial updates don't violate `NOT NULL` on name/price.
-- Planned sales route must use a MySQL transaction (`SELECT ... FOR UPDATE` + decrement) — don't bypass it when you build it.
+- Sales route must use a MySQL transaction (`SELECT ... FOR UPDATE` + decrement) — keep it that way.
+- `/api/sales/recent` must `GROUP BY` the **same** expression as the SELECT (`DATE_FORMAT`), or MySQL 8's `sql_mode=only_full_group_by` rejects it.
+- Don't `SELECT DATE(sold_at)` and JSON-serialize it — mysql2 turns `DATE` into a timezone-shifted JS Date. Use `DATE_FORMAT(sold_at, '%Y-%m-%d')` (returns a plain string) and the chart expecting `{ date: 'YYYY-MM-DD', total_quantity }`.
+- The zero-filled series uses a recursive CTE (`WITH RECURSIVE dates`) + `LEFT JOIN` on a `sold_at >= day AND sold_at < day + INTERVAL 1 DAY` range — keeps the 30-day guarantee and avoids `DATE()` in the join.
 - DB credentials live in `server/.env` (gitignored) — never hardcode.
 - We're on Tailwind v3 (config-based), not v4.
