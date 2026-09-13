@@ -1,148 +1,121 @@
-# StockDash — Inventory & Sales Dashboard
+# 📦 StockDash
 
-![OpenCode Badge](https://img.shields.io/badge/Built%20with-OpenCode-6366f1?style=flat-square&logo=opencode&logoColor=white)
-![Git Badge](https://img.shields.io/badge/Git-initialized-000000?style=flat-square&logo=git&logoColor=white)
-![Node.js Badge](https://img.shields.io/badge/Node.js-22+-339933?style=flat-square&logo=node.js&logoColor=white)
-![React Badge](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=white)
-![Tailwind CSS Badge](https://img.shields.io/badge/Tailwind-v3-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white)
-![MySQL Badge](https://img.shields.io/badge/MySQL-8-4479A1?style=flat-square&logo=mysql&logoColor=white)
+A full-stack inventory and sales management dashboard for managing products, tracking stock, recording sales, and monitoring business performance.
 
----
+## ✨ Features
 
-## Overview
+* 📊 Dashboard with inventory and sales statistics
+* 📦 Add and manage products
+* 🔢 Track available stock
+* ⚠️ Low-stock alerts
+* 💰 Record sales and automatically update stock
+* 📈 Visualize recent sales
+* 🔄 Real-time data from MySQL database
+* 📱 Responsive dashboard interface
 
-StockDash is a full-stack inventory and sales management dashboard for retail stores. Track products, monitor stock levels, log sales, and visualize performance — all from a clean, responsive interface.
+## 🛠️ Tech Stack
 
-| Feature | Description |
-|---|---|
-| **Inventory value** | Real-time total value of all stock on hand |
-| **Low-stock alerts** | Items below threshold highlighted instantly |
-| **Product management** | Add and list products with stock + pricing |
-| **Sale logging** | Sell items with transactional stock validation |
-| **Sales chart** | 30-day bar chart of sales volume |
+**Frontend**
 
-## Architecture
+* React
+* Vite
+* Tailwind CSS
+* Recharts
 
-```
-stockdash/
-├── server/            # Node.js + Express API
-│   ├── index.js       # Routes, middleware, stock transaction logic
-│   ├── db.js          # MySQL connection pool (mysql2)
-│   ├── schema.sql     # DDL + seed data
-│   └── .env.example   # Required env vars
-├── client/            # React (Vite) + Tailwind CSS
-│   └── src/
-│       ├── App.jsx
-│       └── components/
-│           ├── StatsCards.jsx
-│           ├── ProductList.jsx
-│           ├── AddProductForm.jsx
-│           ├── SaleForm.jsx
-│           └── SalesChart.jsx
-├── AGENTS.md          # AI agent context for future sessions
-└── package.json       # Root scripts (runs both via concurrently)
+**Backend**
+
+* Node.js
+* Express.js
+
+**Database**
+
+* MySQL
+
+## 📁 Project Structure
+
+```text
+StockDash/
+├── client/          # React frontend
+├── server/          # Express backend
+├── AGENTS.md        # Project development context
+└── package.json
 ```
 
-## Quick Start
+## 🚀 Getting Started
 
-### Prerequisites
-
-- **Node.js** ≥ 18
-- **MySQL** ≥ 8
-- **npm**
-
-### Setup
+### 1. Clone the repository
 
 ```bash
-# Clone / enter the repo
-cd stockdash
+git clone <your-repository-url>
+cd StockDash
+```
 
-# Install all dependencies
+### 2. Install dependencies
+
+```bash
 npm install
-cd server && npm install
-cd client && npm install
 
-# Create database and seed data
+cd server
+npm install
+
+cd ../client
+npm install
+```
+
+### 3. Set up MySQL
+
+Create a MySQL database and run the SQL file:
+
+```bash
 mysql -u root -p < server/schema.sql
-
-# Configure environment
-cp server/.env.example server/.env
-# Edit server/.env with your MySQL password
 ```
 
-### Run
+### 4. Configure environment variables
+
+Create a `.env` file inside the `server` folder:
+
+```env
+DB_HOST=localhost
+DB_USER=root
+DB_PASSWORD=your_password
+DB_NAME=inventory_db
+PORT=5001
+```
+
+### 5. Run the project
+
+From the root folder:
 
 ```bash
-# Start both API and frontend
 npm run dev
-# → API:   http://localhost:5001
-# → UI:    http://localhost:5173
 ```
 
-Or run individually:
+The application will run on:
 
-```bash
-cd server && npm run dev   # API only (auto-restarts on change)
-cd client && npm run dev   # Frontend only
+```text
+Frontend: http://localhost:5173
+Backend:  http://localhost:5001
 ```
 
-## API Reference
+## 📸 Preview
 
-| Method | Endpoint | Body / Params | Description |
-|---|---|---|---|
-| `GET` | `/api/products` | — | List all products |
-| `POST` | `/api/products` | `{ name, stock_quantity, price }` | Add a new product |
-| `PUT` | `/api/products/:id` | any of `name`, `stock_quantity`, `price` | Update a product |
-| `POST` | `/api/sales` | `{ product_id, quantity_sold }` | Log a sale (validates stock) |
-| `GET` | `/api/sales/recent` | — | Aggregated sales, last 30 days |
+*Add screenshots of the dashboard here.*
 
-**Error responses:** `400` for validation, `404` for missing product, `500` for server errors. The sale endpoint uses a MySQL transaction with `SELECT ... FOR UPDATE` to guarantee stock consistency.
+## 🎯 Future Improvements
 
-## Tech Stack
+* Vehicle and car-part categorization
+* Supplier management
+* Advanced sales reports
+* Search and filtering
+* User authentication and roles
+* Inventory history and analytics
 
-| Layer | Tool | Version |
-|---|---|---|
-| Frontend | React + Vite | 18 + 6 |
-| Styling | Tailwind CSS | 3.x |
-| Charts | Recharts | 2.x |
-| Backend | Express | 4.x |
-| ORM/Driver | mysql2 | 3.x |
-| Process manager | concurrently | 9.x |
+## 👩‍💻 Developer
 
-## Environment Variables
+**Nia**
 
-| Variable | Required | Description |
-|---|---|---|
-| `DB_HOST` | Yes | MySQL host (typically `localhost`) |
-| `DB_USER` | Yes | MySQL username |
-| `DB_PASSWORD` | Yes | MySQL password |
-| `DB_NAME` | Yes | Database name (`inventory_db`) |
-| `PORT` | No | Server port (default `5001`) |
+Built as a full-stack project to explore inventory management, REST APIs, React, and MySQL.
 
-## Contributing
+## 📄 License
 
-1. Create a feature branch
-2. Make changes, ensure `npm run build` succeeds in `/client`
-3. Test against a running MySQL instance
-4. Open a pull request
-
-## AI-Generated Code Notice
-
-> **This project was built using the [OpenCode](https://opencode.ai) AI agent ecosystem.**
->
-> The boilerplate, database schema, Express API, and React dashboard components
-> were designed and generated through interactive sessions with OpenCode agents.
-> The core architecture — including the transactional stock decrement logic,
-> component structure, and API design — originated from AI-assisted development
-> and was reviewed/validated before use.
->
-> OpenCode provides session-aware AI agents that maintain project context across
-> files and conversations, enabling rapid full-stack scaffolding with intentional,
-> verifiable code output.
->
-> Agent context is preserved in [`AGENTS.md`](./AGENTS.md) for continuity across
-> future development sessions.
-
-## License
-
-MIT
+This project is licensed under the MIT License.
