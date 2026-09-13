@@ -46,7 +46,7 @@ StockDash/
 ### 1. Clone the repository
 
 ```bash
-git clone <your-repository-url>
+git clone https://github.com/nia-thegreat/stockdash
 cd StockDash
 ```
 
@@ -96,10 +96,6 @@ The application will run on:
 Frontend: http://localhost:5173
 Backend:  http://localhost:5001
 ```
-
-## 📸 Preview
-
-*Add screenshots of the dashboard here.*
 
 ## 🎯 Future Improvements
 
