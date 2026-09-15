@@ -236,6 +236,7 @@ export default function App() {
               lowStockThreshold={LOW_STOCK_THRESHOLD}
               loading={loading}
               error={error}
+              onRetry={fetchData}
               onUpdatePart={handleUpdatePart}
               onDeletePart={handleDeletePart}
             />
