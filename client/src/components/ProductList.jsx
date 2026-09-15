@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import EditPartModal from './EditPartModal';
+import ConfirmDialog from './ConfirmDialog';
 
 const STATUS_FILTERS = [
   { id: 'all', label: 'All' },
@@ -19,9 +21,13 @@ function getStockStatus(stock, threshold) {
   return 'instock';
 }
 
-export default function ProductList({ parts, lowStockThreshold, loading, error }) {
+export default function ProductList({ parts, lowStockThreshold, loading, error, onUpdatePart, onDeletePart }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [editingPart, setEditingPart] = useState(null);
+  const [deletingPart, setDeletingPart] = useState(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
 
   if (loading) {
     return (
@@ -59,6 +65,19 @@ export default function ProductList({ parts, lowStockThreshold, loading, error }
   });
 
   const isFiltering = statusFilter !== 'all' || normalizedQuery !== '';
+
+  async function handleConfirmDelete() {
+    setDeleteLoading(true);
+    setDeleteError('');
+    try {
+      await onDeletePart(deletingPart.id);
+      setDeletingPart(null);
+    } catch (err) {
+      setDeleteError(err.message);
+    } finally {
+      setDeleteLoading(false);
+    }
+  }
 
   return (
     <div className="bg-white rounded-lg shadow">
@@ -136,6 +155,7 @@ export default function ProductList({ parts, lowStockThreshold, loading, error }
                   <th className="px-5 py-3 font-medium">Price</th>
                   <th className="px-5 py-3 font-medium">Value</th>
                   <th className="px-5 py-3 font-medium">Status</th>
+                  <th className="px-5 py-3 font-medium text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -150,6 +170,9 @@ export default function ProductList({ parts, lowStockThreshold, loading, error }
                     <td className="px-5 py-3">
                       <StatusBadge stock={p.stock_quantity} threshold={lowStockThreshold} />
                     </td>
+                    <td className="px-5 py-3 text-right whitespace-nowrap">
+                      <PartActions part={p} onEdit={setEditingPart} onDelete={setDeletingPart} />
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -159,19 +182,86 @@ export default function ProductList({ parts, lowStockThreshold, loading, error }
           {/* Mobile cards (shown instead of table on small screens) */}
           <div className="md:hidden divide-y divide-gray-100">
             {filteredParts.map((p) => (
-              <div key={p.id} className="px-5 py-4 flex items-center justify-between">
-                <div>
-                  <p className="font-medium text-gray-900">{p.name}</p>
-                  <p className="text-sm text-gray-500">
-                    {p.stock_quantity} in stock — ${Number(p.price).toFixed(2)}
-                  </p>
+              <div key={p.id} className="px-5 py-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-medium text-gray-900">{p.name}</p>
+                    <p className="text-sm text-gray-500">
+                      {p.stock_quantity} in stock — ${Number(p.price).toFixed(2)}
+                    </p>
+                  </div>
+                  <StatusBadge stock={p.stock_quantity} threshold={lowStockThreshold} />
                 </div>
-                <StatusBadge stock={p.stock_quantity} threshold={lowStockThreshold} />
+                <div className="mt-2">
+                  <PartActions part={p} onEdit={setEditingPart} onDelete={setDeletingPart} />
+                </div>
               </div>
             ))}
           </div>
         </>
       )}
+
+      {editingPart && (
+        <EditPartModal
+          part={editingPart}
+          onClose={() => setEditingPart(null)}
+          onSave={onUpdatePart}
+        />
+      )}
+
+      {deletingPart && (
+        <ConfirmDialog
+          title="Delete part"
+          message={`Delete "${deletingPart.name}"? This cannot be undone.`}
+          confirmLabel="Delete"
+          loading={deleteLoading}
+          error={deleteError}
+          onCancel={() => {
+            setDeletingPart(null);
+            setDeleteError('');
+          }}
+          onConfirm={handleConfirmDelete}
+        />
+      )}
+    </div>
+  );
+}
+
+function PartActions({ part, onEdit, onDelete }) {
+  return (
+    <div className="flex items-center gap-3">
+      <button
+        type="button"
+        onClick={() => onEdit(part)}
+        aria-label={`Edit ${part.name}`}
+        className="inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-700"
+      >
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.4-9.4a2 2 0 112.8 2.8L11 14H8v-3l9.6-9.4z"
+          />
+        </svg>
+        Edit
+      </button>
+      <button
+        type="button"
+        onClick={() => onDelete(part)}
+        aria-label={`Delete ${part.name}`}
+        className="inline-flex items-center gap-1 text-sm font-medium text-red-600 hover:text-red-700"
+      >
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v4m4-4v4m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+          />
+        </svg>
+        Delete
+      </button>
     </div>
   );
 }

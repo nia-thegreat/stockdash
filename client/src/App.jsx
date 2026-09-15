@@ -111,6 +111,34 @@ export default function App() {
     await fetchData();
   }
 
+  // Send PUT /api/parts/:id, then refresh
+  async function handleUpdatePart(id, updates) {
+    setError('');
+    const res = await fetch(`/api/parts/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to update part');
+    }
+    await fetchData();
+  }
+
+  // Send DELETE /api/parts/:id, then refresh
+  async function handleDeletePart(id) {
+    setError('');
+    const res = await fetch(`/api/parts/${id}`, {
+      method: 'DELETE',
+    });
+    if (!res.ok) {
+      const data = await res.json();
+      throw new Error(data.error || 'Failed to delete part');
+    }
+    await fetchData();
+  }
+
   const inventoryValue = parts.reduce(
     (sum, p) => sum + Number(p.price) * p.stock_quantity,
     0
@@ -208,6 +236,8 @@ export default function App() {
               lowStockThreshold={LOW_STOCK_THRESHOLD}
               loading={loading}
               error={error}
+              onUpdatePart={handleUpdatePart}
+              onDeletePart={handleDeletePart}
             />
           </section>
         </main>

@@ -113,6 +113,38 @@ app.put('/api/parts/:id', async (req, res) => {
   }
 });
 
+// Delete a part (only if it has no sales history — blocks accidental data loss)
+app.delete('/api/parts/:id', async (req, res) => {
+  const id = Number(req.params.id);
+
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ error: 'Invalid part ID' });
+  }
+
+  try {
+    // Refuse to delete parts that have linked sales rows
+    const [salesCount] = await pool.query(
+      'SELECT COUNT(*) AS count FROM sales WHERE part_id = ?',
+      [id]
+    );
+    if (salesCount[0].count > 0) {
+      return res.status(409).json({
+        error: 'Cannot delete part: part has existing sales history.',
+      });
+    }
+
+    const [result] = await pool.query('DELETE FROM parts WHERE id = ?', [id]);
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Part not found' });
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+
 // Log a sale — transactional stock decrement
 app.post('/api/sales', async (req, res) => {
   const { part_id, quantity_sold } = req.body;

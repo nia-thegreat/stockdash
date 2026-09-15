@@ -38,6 +38,7 @@ Base URL: `http://localhost:5001` (Vite proxies `/api` → `5001` in dev).
 | GET    | `/api/parts`      | List all parts                                            |
 | POST   | `/api/parts`      | Add part `{ name, stock_quantity, price }`                |
 | PUT    | `/api/parts/:id`  | Partial update (any of name/stock_quantity/price)         |
+| DELETE | `/api/parts/:id`  | Delete part — 409 if it has sales history                  |
 | POST   | `/api/sales`      | Log sale `{ part_id, quantity_sold }` — transactional stock decrement, 400 if insufficient, computes `total_amount` |
 | GET    | `/api/sales/recent` | Sales aggregated by date, last 30 days                  |
 
