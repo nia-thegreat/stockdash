@@ -7,8 +7,25 @@ export default function SaleForm({ parts, onLogSale }) {
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
 
+  const selectedPart = parts.find((p) => p.id === Number(partId));
+
+  function validate() {
+    if (!selectedPart) return 'Select a part.';
+    const qty = parseInt(quantity, 10);
+    if (Number.isNaN(qty) || qty < 1) return 'Enter a quantity of at least 1.';
+    if (qty > selectedPart.stock_quantity) {
+      return `Only ${selectedPart.stock_quantity} in stock for ${selectedPart.name}.`;
+    }
+    return '';
+  }
+
   async function handleSubmit(e) {
     e.preventDefault();
+    const message = validate();
+    if (message) {
+      setError(message);
+      return;
+    }
     setSaving(true);
     setError('');
     setSuccess(false);
@@ -37,13 +54,19 @@ export default function SaleForm({ parts, onLogSale }) {
           <select
             required
             value={partId}
-            onChange={(e) => setPartId(e.target.value)}
+            onChange={(e) => {
+              setPartId(e.target.value);
+              setError('');
+              setSuccess(false);
+            }}
             className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
           >
             <option value="" disabled>Select a part</option>
             {parts.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name} — {p.stock_quantity} in stock
+              <option key={p.id} value={p.id} disabled={p.stock_quantity === 0}>
+                {p.stock_quantity === 0
+                  ? `${p.name} — Out of stock`
+                  : `${p.name} — ${p.stock_quantity} in stock`}
               </option>
             ))}
           </select>
@@ -56,7 +79,11 @@ export default function SaleForm({ parts, onLogSale }) {
             required
             min="1"
             value={quantity}
-            onChange={(e) => setQuantity(e.target.value)}
+            onChange={(e) => {
+              setQuantity(e.target.value);
+              setError('');
+              setSuccess(false);
+            }}
             className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             placeholder="1"
           />

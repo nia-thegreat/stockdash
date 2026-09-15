@@ -8,8 +8,26 @@ export default function AddProductForm({ onAddPart }) {
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
 
+  function validate() {
+    if (name.trim() === '') return 'Part name is required.';
+    const quantity = parseInt(stockQuantity, 10);
+    if (Number.isNaN(quantity) || quantity < 0) {
+      return 'Stock quantity must be a non-negative whole number.';
+    }
+    const parsedPrice = parseFloat(price);
+    if (Number.isNaN(parsedPrice) || parsedPrice <= 0) {
+      return 'Price must be a number greater than 0.';
+    }
+    return '';
+  }
+
   async function handleSubmit(e) {
     e.preventDefault();
+    const message = validate();
+    if (message) {
+      setError(message);
+      return;
+    }
     setSaving(true);
     setError('');
     setSuccess(false);
@@ -65,12 +83,12 @@ export default function AddProductForm({ onAddPart }) {
             <input
               type="number"
               required
-              min="0"
+              min="0.01"
               step="0.01"
               value={price}
               onChange={(e) => setPrice(e.target.value)}
               className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="0.00"
+              placeholder="0.01"
             />
           </div>
         </div>
