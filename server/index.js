@@ -39,9 +39,34 @@ app.get('/api/parts', async (req, res) => {
   }
 });
 
+// Deterministic duplicate detection: normalize a part name so casing, extra
+// spacing, and word order all compare equal ("Brake Fluid" ≈ "FLUID   BRAKE").
+function normalizePartName(name) {
+  return String(name)
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .split(' ')
+    .sort()
+    .join(' ');
+}
+
+// Look for an existing part whose normalized name matches the candidate,
+// ignoring `excludeId` (used when editing so a part never flags itself).
+// Returns the matching row ({ id, name, stock_quantity }) or null.
+async function findDuplicatePart(candidateName, excludeId) {
+  const normalized = normalizePartName(candidateName);
+  const [rows] = await pool.query('SELECT id, name, stock_quantity FROM parts');
+  return (
+    rows.find(
+      (row) => row.id !== excludeId && normalizePartName(row.name) === normalized
+    ) || null
+  );
+}
+
 // Add a new part
 app.post('/api/parts', async (req, res) => {
-  const { name, stock_quantity, price } = req.body;
+  const { name, stock_quantity, price, force } = req.body;
 
   if (typeof name !== 'string' || name.trim() === '') {
     return res.status(400).json({ error: 'name is required and must be a string' });
@@ -54,6 +79,18 @@ app.post('/api/parts', async (req, res) => {
   }
 
   try {
+    // Warn about potential duplicates (unless the user chose "Add Anyway").
+    // The check is advisory only — intentional duplicate records stay allowed.
+    if (!force) {
+      const duplicate = await findDuplicatePart(name, null);
+      if (duplicate) {
+        return res.status(409).json({
+          error: 'A part with a similar name already exists',
+          duplicate,
+        });
+      }
+    }
+
     const [result] = await pool.query(
       'INSERT INTO parts (name, stock_quantity, price) VALUES (?, ?, ?)',
       [name.trim(), stock_quantity, price]
@@ -73,7 +110,7 @@ app.put('/api/parts/:id', async (req, res) => {
     return res.status(400).json({ error: 'Invalid part ID' });
   }
 
-  const { name, stock_quantity, price } = req.body;
+  const { name, stock_quantity, price, force } = req.body;
 
   // At least one field must be provided
   if (name === undefined && stock_quantity === undefined && price === undefined) {
@@ -92,6 +129,18 @@ app.put('/api/parts/:id', async (req, res) => {
   }
 
   try {
+    // If renaming, warn about potential duplicates (self excluded) unless the
+    // user chose "Add Anyway". Advisory only — intentional duplicates allowed.
+    if (!force && name !== undefined) {
+      const duplicate = await findDuplicatePart(name, id);
+      if (duplicate) {
+        return res.status(409).json({
+          error: 'A part with a similar name already exists',
+          duplicate,
+        });
+      }
+    }
+
     const [result] = await pool.query(
       'UPDATE parts SET name = COALESCE(?, name), stock_quantity = COALESCE(?, stock_quantity), price = COALESCE(?, price) WHERE id = ?',
       [

@@ -129,17 +129,20 @@ export function StockDashProvider({ children }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Send POST /api/parts, then refresh
-  async function handleAddPart(newPart) {
+  // Send POST /api/parts, then refresh. `options.force` retries after the user
+  // chose "Add Anyway" past a duplicate warning (the server skips its check).
+  async function handleAddPart(newPart, options = {}) {
     setError('');
     const res = await fetch('/api/parts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newPart),
+      body: JSON.stringify({ ...newPart, force: options.force === true }),
     });
     const data = await res.json();
     if (!res.ok) {
-      throw new Error(data.error || 'Failed to add part');
+      const err = new Error(data.error || 'Failed to add part');
+      if (res.status === 409 && data.duplicate) err.duplicate = data.duplicate;
+      throw err;
     }
     await fetchData();
   }
@@ -159,17 +162,20 @@ export function StockDashProvider({ children }) {
     await fetchData();
   }
 
-  // Send PUT /api/parts/:id, then refresh
-  async function handleUpdatePart(id, updates) {
+  // Send PUT /api/parts/:id, then refresh. `options.force` skips the server's
+  // duplicate check when the user chose "Add Anyway" while editing.
+  async function handleUpdatePart(id, updates, options = {}) {
     setError('');
     const res = await fetch(`/api/parts/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updates),
+      body: JSON.stringify({ ...updates, force: options.force === true }),
     });
     const data = await res.json();
     if (!res.ok) {
-      throw new Error(data.error || 'Failed to update part');
+      const err = new Error(data.error || 'Failed to update part');
+      if (res.status === 409 && data.duplicate) err.duplicate = data.duplicate;
+      throw err;
     }
     await fetchData();
   }
