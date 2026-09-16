@@ -1,28 +1,27 @@
-import StatsCards from './StatsCards';
-import SalesOverviewChart from './SalesOverviewChart';
-import TopSellingParts from './TopSellingParts';
-import RecentSales from './RecentSales';
-import LowStockAlerts from './LowStockAlerts';
+import { useNavigate } from 'react-router-dom';
+import { useStockDash } from '../context/StockDashContext';
+import { LOW_STOCK_THRESHOLD } from '../utils/constants';
+import StatsCards from '../components/StatsCards';
+import SalesOverviewChart from '../components/SalesOverviewChart';
+import TopSellingParts from '../components/TopSellingParts';
+import RecentSales from '../components/RecentSales';
+import LowStockAlerts from '../components/LowStockAlerts';
 
-export default function Dashboard({
-  parts,
-  lowStockThreshold,
-  loading,
-  totalRevenue,
-  overviewSeries,
-  topParts,
-  recentSales,
-  onNavigate,
-}) {
+export default function Dashboard() {
+  const navigate = useNavigate();
+  const { parts, loading, dashboardAnalytics, overviewSeries, recentSalesPreview } = useStockDash();
+
   const inventoryValue = parts.reduce((sum, p) => sum + Number(p.price) * p.stock_quantity, 0);
-  const lowStockCount = parts.filter((p) => p.stock_quantity < lowStockThreshold).length;
+  const lowStockCount = parts.filter((p) => p.stock_quantity < LOW_STOCK_THRESHOLD).length;
+  const totalRevenue = Number(dashboardAnalytics?.summary?.revenue) || 0;
+  const topParts = dashboardAnalytics?.topParts || [];
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-end gap-3">
         <button
           type="button"
-          onClick={() => onNavigate('inventory')}
+          onClick={() => navigate('/inventory')}
           className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 transition-colors"
         >
           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -32,7 +31,7 @@ export default function Dashboard({
         </button>
         <button
           type="button"
-          onClick={() => onNavigate('sales')}
+          onClick={() => navigate('/sales')}
           className="inline-flex items-center gap-2 rounded-lg bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 transition-colors"
         >
           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -64,11 +63,11 @@ export default function Dashboard({
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <LowStockAlerts
           parts={parts}
-          threshold={lowStockThreshold}
+          threshold={LOW_STOCK_THRESHOLD}
           loading={loading}
-          onViewAll={() => onNavigate('inventory')}
+          onViewAll={() => navigate('/inventory')}
         />
-        <RecentSales sales={recentSales} loading={loading} onViewAll={() => onNavigate('sales')} />
+        <RecentSales sales={recentSalesPreview} loading={loading} onViewAll={() => navigate('/sales')} />
       </div>
     </div>
   );
