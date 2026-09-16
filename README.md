@@ -1,6 +1,6 @@
 # 📦 StockDash
 
-A full-stack inventory and sales management dashboard for managing products, tracking stock, recording sales, and monitoring business performance.
+StockDash is a full-stack car-parts inventory and sales management dashboard designed to help retail businesses manage parts, monitor stock levels, record sales, and track inventory performance. It features a responsive React interface, a Node.js/Express backend, and a MySQL database, with real-time stock updates, low-stock alerts, sales tracking, and visual performance analytics.
 
 ## ✨ Features
 
