@@ -9,6 +9,28 @@ function unitPrice(sale) {
   return sale.quantity_sold > 0 ? Number(sale.total_amount) / Number(sale.quantity_sold) : 0;
 }
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// Reformat the frozen MySQL string 'YYYY-MM-DD HH:MM' without touching timezone math.
+function formatSaleDate(value) {
+  const [datePart, timePart] = typeof value === 'string' ? value.split(' ') : [null, null];
+  if (!datePart) return value;
+  const [y, m, d] = datePart.split('-').map(Number);
+  if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d) || !MONTHS[m - 1]) {
+    return value;
+  }
+  let time = '';
+  if (timePart) {
+    const [hh, mm] = timePart.split(':').map(Number);
+    if (Number.isInteger(hh) && Number.isInteger(mm)) {
+      const period = hh >= 12 ? 'PM' : 'AM';
+      const hour12 = hh % 12 === 0 ? 12 : hh % 12;
+      time = ` · ${hour12}:${String(mm).padStart(2, '0')} ${period}`;
+    }
+  }
+  return `${MONTHS[m - 1]} ${d}, ${y}${time}`;
+}
+
 export default function SalesHistory({ sales, loading, error, onRetry }) {
   const [retrying, setRetrying] = useState(false);
 
@@ -76,8 +98,13 @@ export default function SalesHistory({ sales, loading, error, onRetry }) {
 
   return (
     <div className="bg-white rounded-lg shadow">
-      <div className="px-5 py-4 border-b flex items-center justify-between gap-3 flex-wrap">
-        <h2 className="text-lg font-semibold text-gray-900">Sales History</h2>
+      <div className="px-5 py-4 border-b flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900">Sales History</h2>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Unit prices reflect the price when each sale was recorded.
+          </p>
+        </div>
         <span className="inline-flex items-center rounded-full bg-gray-100 px-3 py-1 text-sm font-medium text-gray-600">
           {sales.length} {sales.length === 1 ? 'sale' : 'sales'}
         </span>
@@ -91,14 +118,14 @@ export default function SalesHistory({ sales, loading, error, onRetry }) {
               <th className="px-5 py-3 font-semibold">Date</th>
               <th className="px-5 py-3 font-semibold">Part</th>
               <th className="px-5 py-3 font-semibold text-right">Qty</th>
-              <th className="px-5 py-3 font-semibold text-right">Price</th>
+              <th className="px-5 py-3 font-semibold text-right">Unit Price</th>
               <th className="px-5 py-3 font-semibold text-right">Total</th>
             </tr>
           </thead>
           <tbody>
             {sales.map((s) => (
               <tr key={s.id} className="border-b last:border-b-0 hover:bg-gray-50/70 transition-colors">
-                <td className="px-5 py-3.5 text-gray-500 whitespace-nowrap tabular-nums">{s.sold_at}</td>
+                <td className="px-5 py-3.5 text-gray-500 whitespace-nowrap tabular-nums">{formatSaleDate(s.sold_at)}</td>
                 <td className="px-5 py-3.5 font-medium text-gray-900 whitespace-nowrap">{s.part_name}</td>
                 <td className="px-5 py-3.5 text-right tabular-nums text-gray-700">{s.quantity_sold}</td>
                 <td className="px-5 py-3.5 text-right tabular-nums text-gray-700">{money(unitPrice(s))}</td>
@@ -118,7 +145,7 @@ export default function SalesHistory({ sales, loading, error, onRetry }) {
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-sm font-medium text-gray-900 truncate">{s.part_name}</p>
-                <p className="mt-0.5 text-xs text-gray-500 tabular-nums">{s.sold_at}</p>
+                <p className="mt-0.5 text-xs text-gray-500 tabular-nums">{formatSaleDate(s.sold_at)}</p>
               </div>
               <p className="text-sm font-semibold text-gray-900 tabular-nums">{money(s.total_amount)}</p>
             </div>
