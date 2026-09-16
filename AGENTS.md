@@ -40,13 +40,14 @@ Base URL: `http://localhost:5001` (Vite proxies `/api` → `5001` in dev).
 | PUT    | `/api/parts/:id`  | Partial update (any of name/stock_quantity/price)         |
 | DELETE | `/api/parts/:id`  | Delete part — 409 if it has sales history                  |
 | POST   | `/api/sales`      | Log sale `{ part_id, quantity_sold }` — transactional stock decrement, 400 if insufficient, computes `total_amount` |
-| GET    | `/api/sales`      | All sales with `part_name` (JOIN parts), `sold_at` as `DATE_FORMAT('%Y-%m-%d %H:%i')` string, newest first |
+| GET    | `/api/sales`      | Sales with `part_name` (JOIN parts), `sold_at` as `DATE_FORMAT('%Y-%m-%d %H:%i')` string, newest first. Optional server-side filters: `search` (LIKE part name), `from`/`to` (YYYY-MM-DD, inclusive range). |
 | GET    | `/api/sales/recent` | Sales aggregated by date, last 30 days                  |
 
 ## Frontend
 
 - Components live in `client/src/components/` (`StatsCards`, `ProductList`, `AddProductForm`, `SaleForm`, `SalesChart`).
-- All data is wired to the API: `App.jsx` fetches `GET /api/parts` + `GET /api/sales/recent` + `GET /api/sales` in parallel on mount; `handleAddPart` does `POST /api/parts` then refetches. `handleLogSale` does `POST /api/sales` (server decrements stock), then refetches. `GET /api/sales` feeds `SalesHistory` (table/cards) + `SalesSummary` (revenue/units/transactions derived client-side from the MySQL rows).
+- All data is wired to the API: `App.jsx` fetches `GET /api/parts` + `GET /api/sales/recent` + `GET /api/sales` in parallel on mount; `handleAddPart` does `POST /api/parts` then refetches. `handleLogSale` does `POST /api/sales` (server decrements stock), then refetches with the active filters applied. `GET /api/sales` feeds `SalesHistory` (table/cards) + `SalesSummary` (revenue/units/transactions derived client-side from the MySQL rows).
+- Sales filtering is **server-side**: `App.jsx` owns `salesQuery` (`{ search, range: all|today|week|month|custom, customFrom, customTo }`), maps it to `search`/`from`/`to` query params via `buildSalesParams()`, and refetches `/api/sales` on a 300 ms debounce (separate `historyLoading` so the chart/forms don't flicker). `SalesSummary` and `SalesHistory` both render the filtered array; `SalesSummary` shows the active scope in a pill (e.g. `12 sales · This week`). `this-week` = Monday → today; `this-month` = 1st → today.
 - `SalesChart` uses **Recharts v3** (`BarChart`) — installed, not a dev-dependency.
 - `GET /api/sales/recent` returns a **zero-filled 30-day series** (recursive CTE) so days without sales render as zero-height bars; never returns fewer than 30 rows except on error.
 - Dashboard metrics (inventory value, total parts, low-stock count) are derived in `App.jsx` and rendered by `StatsCards`; only the parts list itself is fetched.

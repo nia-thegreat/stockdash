@@ -9,6 +9,60 @@ import SalesChart from './components/SalesChart';
 
 const LOW_STOCK_THRESHOLD = 5;
 
+// Shared (non-hook) date helpers for the sales date filters
+function toYMD(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+// Monday of the week containing `date` (ISO-style week start)
+function mondayOfWeek(date) {
+  const d = new Date(date);
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  return d;
+}
+
+// Map the filter UI state to API query params ("" = omitted)
+function buildSalesParams(query) {
+  const params = {};
+  if (query.search.trim()) params.search = query.search.trim();
+  const now = new Date();
+  switch (query.range) {
+    case 'today':
+      params.from = toYMD(now);
+      params.to = toYMD(now);
+      break;
+    case 'week':
+      params.from = toYMD(mondayOfWeek(now));
+      params.to = toYMD(now);
+      break;
+    case 'month':
+      params.from = toYMD(new Date(now.getFullYear(), now.getMonth(), 1));
+      params.to = toYMD(now);
+      break;
+    case 'custom':
+      if (query.customFrom) params.from = query.customFrom;
+      if (query.customTo) params.to = query.customTo;
+      break;
+    default:
+      break;
+  }
+  return params;
+}
+
+// Human-readable label for the active sales filter scope
+function scopeLabelOf(query) {
+  let scope = 'All time';
+  if (query.range === 'today') scope = 'Today';
+  else if (query.range === 'week') scope = 'This week';
+  else if (query.range === 'month') scope = 'This month';
+  else if (query.range === 'custom') scope = query.customFrom || query.customTo ? 'Custom range' : 'All time';
+  if (query.search.trim()) scope += ` · "${query.search.trim()}"`;
+  return scope;
+}
+
 const NAV_ITEMS = [
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'inventory', label: 'Inventory' },
@@ -25,27 +79,65 @@ export default function App() {
   const mainRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [salesQuery, setSalesQuery] = useState({ search: '', range: 'all', customFrom: '', customTo: '' });
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState('');
 
-  // Fetch parts, recent sales (chart), and full sales history in parallel
+  // Fetch sales history honoring the current filters (server-side filtering)
+  async function fetchSales(params = {}) {
+    const qs = new URLSearchParams();
+    if (params.search) qs.set('search', params.search);
+    if (params.from) qs.set('from', params.from);
+    if (params.to) qs.set('to', params.to);
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    const res = await fetch(`/api/sales${suffix}`);
+    if (!res.ok) throw new Error('Could not load sales');
+    return res.json();
+  }
+
+  // Fetch parts, recent sales (chart), and filtered sales history in parallel
   async function fetchData() {
     try {
       setLoading(true);
-      const [partsRes, recentRes, historyRes] = await Promise.all([
+      const [partsRes, recentRes] = await Promise.all([
         fetch('/api/parts'),
         fetch('/api/sales/recent'),
-        fetch('/api/sales'),
       ]);
-      if (!partsRes.ok || !recentRes.ok || !historyRes.ok) throw new Error('Could not load data');
+      if (!partsRes.ok || !recentRes.ok) throw new Error('Could not load data');
       setParts(await partsRes.json());
       setRecentSales(await recentRes.json());
-      setSalesHistory(await historyRes.json());
+      setSalesHistory(await fetchSales(buildSalesParams(salesQuery)));
       setError('');
+      setHistoryError('');
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
     }
   }
+
+  // Debounced refetch of sales history when the filters change
+  useEffect(() => {
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        setHistoryLoading(true);
+        const data = await fetchSales(buildSalesParams(salesQuery));
+        if (!cancelled) setSalesHistory(data);
+        setHistoryError('');
+      } catch (err) {
+        if (!cancelled) setHistoryError(err.message);
+      } finally {
+        if (!cancelled) setHistoryLoading(false);
+      }
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+    // fetchSales intentionally excluded — it is recreated each render
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [salesQuery]);
 
   // Load data once when the app starts
   useEffect(() => {
@@ -228,7 +320,11 @@ export default function App() {
           </section>
 
           <section id="sales" className="space-y-6 scroll-mt-16">
-            <SalesSummary sales={salesHistory} loading={loading} />
+            <SalesSummary
+              sales={salesHistory}
+              loading={loading || historyLoading}
+              scopeLabel={scopeLabelOf(salesQuery)}
+            />
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <SalesChart data={recentSales} loading={loading} />
@@ -237,9 +333,11 @@ export default function App() {
 
             <SalesHistory
               sales={salesHistory}
-              loading={loading}
-              error={error}
+              loading={loading || historyLoading}
+              error={error || historyError}
               onRetry={fetchData}
+              filters={salesQuery}
+              onFilterChange={setSalesQuery}
             />
           </section>
 

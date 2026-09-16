@@ -145,17 +145,56 @@ app.delete('/api/parts/:id', async (req, res) => {
   }
 });
 
-// Get all sales history with part names, newest first
+// Get sales history with part names, newest first.
+// Optional query params (all filtering done in MySQL):
+//   search=<text>  partial match on part name
+//   from=YYYY-MM-DD / to=YYYY-MM-DD  inclusive date range
 app.get('/api/sales', async (req, res) => {
+  const { search, from, to } = req.query;
+  if (search !== undefined && search.length > 100) {
+    return res.status(400).json({ error: 'Search must be 100 characters or fewer' });
+  }
+  const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+  function isValidDate(value) {
+    if (!DATE_RE.test(value)) return false;
+    const [y, m, d] = value.split('-').map(Number);
+    if (m < 1 || m > 12 || d < 1 || d > 31) return false;
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+  }
+  if (from !== undefined && from !== '' && !isValidDate(from)) {
+    return res.status(400).json({ error: 'from must be a valid date (YYYY-MM-DD)' });
+  }
+  if (to !== undefined && to !== '' && !isValidDate(to)) {
+    return res.status(400).json({ error: 'to must be a valid date (YYYY-MM-DD)' });
+  }
+
+  const conditions = [];
+  const params = [];
+  if (search) {
+    conditions.push("parts.name LIKE CONCAT('%', ?, '%')");
+    params.push(search);
+  }
+  if (from) {
+    conditions.push('sales.sold_at >= ?');
+    params.push(from);
+  }
+  if (to) {
+    conditions.push('sales.sold_at < DATE_ADD(?, INTERVAL 1 DAY)');
+    params.push(to);
+  }
+
   try {
+    const whereSql = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const [rows] = await pool.query(`
       SELECT sales.id, sales.part_id, parts.name AS part_name,
              sales.quantity_sold, sales.total_amount,
              DATE_FORMAT(sales.sold_at, '%Y-%m-%d %H:%i') AS sold_at
       FROM sales
       JOIN parts ON parts.id = sales.part_id
+      ${whereSql}
       ORDER BY sales.sold_at DESC, sales.id DESC
-    `);
+    `, params);
     res.json(rows);
   } catch (err) {
     res.status(500).json({ error: 'Database error' });
