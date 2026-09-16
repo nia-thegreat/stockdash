@@ -1,11 +1,11 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import StatsCards from './components/StatsCards';
 import ProductList from './components/ProductList';
 import AddProductForm from './components/AddProductForm';
 import SaleForm from './components/SaleForm';
-import SalesSummary from './components/SalesSummary';
+import SalesAnalytics from './components/SalesAnalytics';
+import TopSellingParts from './components/TopSellingParts';
 import SalesHistory from './components/SalesHistory';
-import SalesChart from './components/SalesChart';
 
 const LOW_STOCK_THRESHOLD = 5;
 
@@ -72,11 +72,10 @@ const NAV_ITEMS = [
 
 export default function App() {
   const [parts, setParts] = useState([]);
-  const [recentSales, setRecentSales] = useState([]);
   const [salesHistory, setSalesHistory] = useState([]);
+  const [analytics, setAnalytics] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activeSection, setActiveSection] = useState('dashboard');
-  const mainRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [salesQuery, setSalesQuery] = useState({ search: '', range: 'all', customFrom: '', customTo: '' });
@@ -95,18 +94,49 @@ export default function App() {
     return res.json();
   }
 
-  // Fetch parts, recent sales (chart), and filtered sales history in parallel
+  // Fetch sales analytics for the same filter (server-side aggregates + charts)
+  async function fetchAnalytics(params = {}) {
+    const qs = new URLSearchParams();
+    if (params.bucket) qs.set('bucket', params.bucket);
+    if (params.search) qs.set('search', params.search);
+    if (params.from) qs.set('from', params.from);
+    if (params.to) qs.set('to', params.to);
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    const res = await fetch(`/api/sales/analytics${suffix}`);
+    if (!res.ok) throw new Error('Could not load sales analytics');
+    return res.json();
+  }
+
+  // Chart granularity: daily for spans up to 45 days, monthly beyond that
+  function bucketFor(params) {
+    if (params.from && params.to) {
+      const days = (Date.parse(params.to) - Date.parse(params.from)) / 86400000;
+      return days <= 45 ? 'day' : 'month';
+    }
+    return 'month';
+  }
+
+  // Fetch history + analytics together so both always share the same filter
+  async function fetchSalesData(params = {}) {
+    const [history, analyticsData] = await Promise.all([
+      fetchSales(params),
+      fetchAnalytics({ ...params, bucket: bucketFor(params) }),
+    ]);
+    return { history, analytics: analyticsData };
+  }
+
+  // Fetch parts and filtered sales data in parallel
   async function fetchData() {
     try {
       setLoading(true);
-      const [partsRes, recentRes] = await Promise.all([
+      const [partsRes, salesData] = await Promise.all([
         fetch('/api/parts'),
-        fetch('/api/sales/recent'),
+        fetchSalesData(buildSalesParams(salesQuery)),
       ]);
-      if (!partsRes.ok || !recentRes.ok) throw new Error('Could not load data');
+      if (!partsRes.ok) throw new Error('Could not load data');
       setParts(await partsRes.json());
-      setRecentSales(await recentRes.json());
-      setSalesHistory(await fetchSales(buildSalesParams(salesQuery)));
+      setSalesHistory(salesData.history);
+      setAnalytics(salesData.analytics);
       setError('');
       setHistoryError('');
     } catch (err) {
@@ -116,15 +146,18 @@ export default function App() {
     }
   }
 
-  // Debounced refetch of sales history when the filters change
+  // Debounced refetch of history + analytics when the filters change
   useEffect(() => {
     let cancelled = false;
     const timer = setTimeout(async () => {
       try {
         setHistoryLoading(true);
-        const data = await fetchSales(buildSalesParams(salesQuery));
-        if (!cancelled) setSalesHistory(data);
-        setHistoryError('');
+        const data = await fetchSalesData(buildSalesParams(salesQuery));
+        if (!cancelled) {
+          setSalesHistory(data.history);
+          setAnalytics(data.analytics);
+          setHistoryError('');
+        }
       } catch (err) {
         if (!cancelled) setHistoryError(err.message);
       } finally {
@@ -135,36 +168,13 @@ export default function App() {
       cancelled = true;
       clearTimeout(timer);
     };
-    // fetchSales intentionally excluded — it is recreated each render
+    // fetchSalesData intentionally excluded — it is recreated each render
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [salesQuery]);
 
   // Load data once when the app starts
   useEffect(() => {
     fetchData();
-  }, []);
-
-  // Scroll-spy: highlight the sidebar item for the section nearest to the
-  // top of the scrollable content area (IntersectionObserver beats scroll events).
-  useEffect(() => {
-    const container = mainRef.current;
-    if (!container) return;
-
-    const sections = NAV_ITEMS.map((item) => document.getElementById(item.id)).filter(Boolean);
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const visible = entries
-          .filter((entry) => entry.isIntersecting)
-          .sort((a, b) => Math.abs(a.boundingClientRect.top) - Math.abs(b.boundingClientRect.top));
-        if (visible.length > 0 && visible[0].target.id) {
-          setActiveSection(visible[0].target.id);
-        }
-      },
-      { root: container, rootMargin: '0px 0px -70% 0px' }
-    );
-
-    sections.forEach((section) => observer.observe(section));
-    return () => observer.disconnect();
   }, []);
 
   // Smooth-scroll to a section, highlight it, and close the mobile drawer
@@ -285,7 +295,7 @@ export default function App() {
       )}
 
       {/* Main column — this is the only scroll container */}
-      <div ref={mainRef} className="flex-1 flex flex-col min-w-0 overflow-y-auto lg:pl-60">
+      <div className="flex-1 flex flex-col min-w-0 overflow-y-auto lg:pl-60">
         <header className="bg-white shadow-sm sticky top-0 z-10">
           <div className="px-4 py-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -320,14 +330,19 @@ export default function App() {
           </section>
 
           <section id="sales" className="space-y-6 scroll-mt-16">
-            <SalesSummary
-              sales={salesHistory}
+            <SalesAnalytics
+              data={analytics}
               loading={loading || historyLoading}
+              error={error || historyError}
+              onRetry={fetchData}
               scopeLabel={scopeLabelOf(salesQuery)}
             />
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <SalesChart data={recentSales} loading={loading} />
+              <TopSellingParts
+                parts={analytics?.topParts || []}
+                loading={loading || historyLoading}
+              />
               <SaleForm parts={parts} onLogSale={handleLogSale} />
             </div>
 

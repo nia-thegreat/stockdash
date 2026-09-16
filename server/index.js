@@ -145,15 +145,17 @@ app.delete('/api/parts/:id', async (req, res) => {
   }
 });
 
-// Get sales history with part names, newest first.
-// Optional query params (all filtering done in MySQL):
-//   search=<text>  partial match on part name
-//   from=YYYY-MM-DD / to=YYYY-MM-DD  inclusive date range
-app.get('/api/sales', async (req, res) => {
+// Shared helper: validate the sales query params (search/from/to) and build
+// the WHERE clause + parameters. Returns { error } or { whereSql, params }.
+// Used by both GET /api/sales and GET /api/sales/analytics so every metric
+// shares exactly the same filter.
+function buildSalesFilter(req) {
   const { search, from, to } = req.query;
+
   if (search !== undefined && search.length > 100) {
-    return res.status(400).json({ error: 'Search must be 100 characters or fewer' });
+    return { error: 'Search must be 100 characters or fewer' };
   }
+
   const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
   function isValidDate(value) {
     if (!DATE_RE.test(value)) return false;
@@ -163,10 +165,10 @@ app.get('/api/sales', async (req, res) => {
     return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
   }
   if (from !== undefined && from !== '' && !isValidDate(from)) {
-    return res.status(400).json({ error: 'from must be a valid date (YYYY-MM-DD)' });
+    return { error: 'from must be a valid date (YYYY-MM-DD)' };
   }
   if (to !== undefined && to !== '' && !isValidDate(to)) {
-    return res.status(400).json({ error: 'to must be a valid date (YYYY-MM-DD)' });
+    return { error: 'to must be a valid date (YYYY-MM-DD)' };
   }
 
   const conditions = [];
@@ -184,18 +186,158 @@ app.get('/api/sales', async (req, res) => {
     params.push(to);
   }
 
+  const whereSql = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  return { whereSql, params };
+}
+
+// Get sales history with part names, newest first.
+// Optional query params (all filtering done in MySQL):
+//   search=<text>  partial match on part name
+//   from=YYYY-MM-DD / to=YYYY-MM-DD  inclusive date range
+app.get('/api/sales', async (req, res) => {
+  const filter = buildSalesFilter(req);
+  if (filter.error) {
+    return res.status(400).json({ error: filter.error });
+  }
+
   try {
-    const whereSql = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const [rows] = await pool.query(`
       SELECT sales.id, sales.part_id, parts.name AS part_name,
              sales.quantity_sold, sales.total_amount,
              DATE_FORMAT(sales.sold_at, '%Y-%m-%d %H:%i') AS sold_at
       FROM sales
       JOIN parts ON parts.id = sales.part_id
-      ${whereSql}
+      ${filter.whereSql}
       ORDER BY sales.sold_at DESC, sales.id DESC
-    `, params);
+    `, filter.params);
     res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+
+// Sales analytics for the SAME filter as GET /api/sales: aggregate summary,
+// a zero-filled time series, and the top-selling parts. Everything is computed
+// in MySQL so all metrics share one consistent date range.
+//   bucket=day|month  → time-series granularity (client picks by range length)
+// Returns: { summary: {revenue, units_sold, transactions, avg_sale_value},
+//            timeseries: [{label, quantity, revenue}], topParts: [...], }
+function toYMD(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+app.get('/api/sales/analytics', async (req, res) => {
+  const filter = buildSalesFilter(req);
+  if (filter.error) {
+    return res.status(400).json({ error: filter.error });
+  }
+
+  const { bucket } = req.query;
+  if (bucket !== 'day' && bucket !== 'month') {
+    return res.status(400).json({ error: 'bucket must be "day" or "month"' });
+  }
+
+  const { from, to } = req.query;
+
+  try {
+    // Aggregate summary
+    const [summaryRows] = await pool.query(`
+      SELECT COALESCE(SUM(sales.total_amount), 0) AS revenue,
+             COALESCE(SUM(sales.quantity_sold), 0) AS units_sold,
+             COUNT(*) AS transactions,
+             COALESCE(AVG(sales.total_amount), 0) AS avg_sale_value
+      FROM sales
+      JOIN parts ON parts.id = sales.part_id
+      ${filter.whereSql}
+    `, filter.params);
+    const summary = {
+      revenue: Number(summaryRows[0].revenue),
+      units_sold: Number(summaryRows[0].units_sold),
+      transactions: Number(summaryRows[0].transactions),
+      avg_sale_value: Number(summaryRows[0].avg_sale_value),
+    };
+
+    // Top-selling parts (by units sold), top 5
+    const [topRows] = await pool.query(`
+      SELECT parts.name AS part_name,
+             COALESCE(SUM(sales.quantity_sold), 0) AS units_sold,
+             COALESCE(SUM(sales.total_amount), 0) AS revenue,
+             COUNT(*) AS sales_count
+      FROM sales
+      JOIN parts ON parts.id = sales.part_id
+      ${filter.whereSql}
+      GROUP BY sales.part_id, parts.name
+      ORDER BY units_sold DESC, revenue DESC
+      LIMIT 5
+    `, filter.params);
+    const topParts = topRows.map((r) => ({
+      part_name: r.part_name,
+      units_sold: Number(r.units_sold),
+      revenue: Number(r.revenue),
+      sales_count: Number(r.sales_count),
+    }));
+
+    // Zero-filled time series (revenue + units), day or month granularity
+    let timeseries;
+    if (bucket === 'day') {
+      const today = new Date();
+      const start = from || toYMD(new Date(today.getTime() - 29 * 86400000));
+      const end = to || toYMD(today);
+      const [series] = await pool.query(`
+        WITH RECURSIVE dates AS (
+          SELECT ? AS day
+          UNION ALL
+          SELECT day + INTERVAL 1 DAY FROM dates WHERE day < DATE_ADD(?, INTERVAL 1 DAY)
+        )
+        SELECT DATE_FORMAT(dates.day, '%Y-%m-%d') AS label,
+               COALESCE(SUM(sales.quantity_sold), 0) AS quantity,
+               COALESCE(SUM(sales.total_amount), 0) AS revenue
+        FROM dates
+        LEFT JOIN sales
+          ON sales.sold_at >= dates.day
+         AND sales.sold_at < dates.day + INTERVAL 1 DAY
+        GROUP BY dates.day
+        ORDER BY dates.day ASC
+      `, [start, end]);
+      timeseries = series.map((r) => ({
+        label: r.label,
+        quantity: Number(r.quantity),
+        revenue: Number(r.revenue),
+      }));
+    } else {
+      // month bucket — no from/to means All Time, starting at the earliest sale
+      let monthStart;
+      if (from) {
+        monthStart = `${from.slice(0, 7)}-01`;
+      } else {
+        const [minRow] = await pool.query("SELECT DATE_FORMAT(MIN(sold_at), '%Y-%m-01') AS m FROM sales");
+        monthStart = minRow[0].m || toYMD(new Date()).slice(0, 8) + '01';
+      }
+      const monthEnd = to ? `${to.slice(0, 7)}-01` : `${toYMD(new Date()).slice(0, 7)}-01`;
+      const [series] = await pool.query(`
+        WITH RECURSIVE months AS (
+          SELECT ? AS m
+          UNION ALL
+          SELECT m + INTERVAL 1 MONTH FROM months WHERE m < DATE_FORMAT(?, '%Y-%m-01')
+        )
+        SELECT DATE_FORMAT(months.m, '%Y-%m') AS label,
+               COALESCE(SUM(sales.quantity_sold), 0) AS quantity,
+               COALESCE(SUM(sales.total_amount), 0) AS revenue
+        FROM months
+        LEFT JOIN sales
+          ON sales.sold_at >= months.m
+         AND sales.sold_at < months.m + INTERVAL 1 MONTH
+        GROUP BY months.m
+        ORDER BY months.m ASC
+      `, [monthStart, monthEnd]);
+      timeseries = series.map((r) => ({
+        label: r.label,
+        quantity: Number(r.quantity),
+        revenue: Number(r.revenue),
+      }));
+    }
+
+    res.json({ summary, timeseries, topParts });
   } catch (err) {
     res.status(500).json({ error: 'Database error' });
   }
@@ -264,31 +406,6 @@ app.post('/api/sales', async (req, res) => {
     res.status(500).json({ error: 'Database error' });
   } finally {
     conn.release();
-  }
-});
-
-// Recent sales — last 30 days, quantity sold per day (for the chart).
-// Generates a full 30-day date series so days with no sales return 0.
-app.get('/api/sales/recent', async (req, res) => {
-  try {
-    const [rows] = await pool.query(`
-      WITH RECURSIVE dates AS (
-        SELECT CURDATE() - INTERVAL 29 DAY AS day
-        UNION ALL
-        SELECT day + INTERVAL 1 DAY FROM dates WHERE day < CURDATE()
-      )
-      SELECT DATE_FORMAT(dates.day, '%Y-%m-%d') AS date,
-             COALESCE(SUM(sales.quantity_sold), 0) AS total_quantity
-      FROM dates
-      LEFT JOIN sales
-        ON sales.sold_at >= dates.day
-       AND sales.sold_at < dates.day + INTERVAL 1 DAY
-      GROUP BY dates.day
-      ORDER BY dates.day ASC
-    `);
-    res.json(rows);
-  } catch (err) {
-    res.status(500).json({ error: 'Database error' });
   }
 });
 

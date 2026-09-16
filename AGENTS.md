@@ -41,15 +41,14 @@ Base URL: `http://localhost:5001` (Vite proxies `/api` → `5001` in dev).
 | DELETE | `/api/parts/:id`  | Delete part — 409 if it has sales history                  |
 | POST   | `/api/sales`      | Log sale `{ part_id, quantity_sold }` — transactional stock decrement, 400 if insufficient, computes `total_amount` |
 | GET    | `/api/sales`      | Sales with `part_name` (JOIN parts), `sold_at` as `DATE_FORMAT('%Y-%m-%d %H:%i')` string, newest first. Optional server-side filters: `search` (LIKE part name), `from`/`to` (YYYY-MM-DD, inclusive range). |
-| GET    | `/api/sales/recent` | Sales aggregated by date, last 30 days                  |
+| GET    | `/api/sales/analytics` | Filtered aggregates, zero-filled time series (day/month buckets), and top 5 parts. Params: `search`, `from`, `to`, `bucket=day|month`. Returns `{ summary, timeseries, topParts }` |
 
 ## Frontend
 
-- Components live in `client/src/components/` (`StatsCards`, `ProductList`, `AddProductForm`, `SaleForm`, `SalesChart`).
-- All data is wired to the API: `App.jsx` fetches `GET /api/parts` + `GET /api/sales/recent` + `GET /api/sales` in parallel on mount; `handleAddPart` does `POST /api/parts` then refetches. `handleLogSale` does `POST /api/sales` (server decrements stock), then refetches with the active filters applied. `GET /api/sales` feeds `SalesHistory` (table/cards) + `SalesSummary` (revenue/units/transactions derived client-side from the MySQL rows).
-- Sales filtering is **server-side**: `App.jsx` owns `salesQuery` (`{ search, range: all|today|week|month|custom, customFrom, customTo }`), maps it to `search`/`from`/`to` query params via `buildSalesParams()`, and refetches `/api/sales` on a 300 ms debounce (separate `historyLoading` so the chart/forms don't flicker). `SalesSummary` and `SalesHistory` both render the filtered array; `SalesSummary` shows the active scope in a pill (e.g. `12 sales · This week`). `this-week` = Monday → today; `this-month` = 1st → today.
-- `SalesChart` uses **Recharts v3** (`BarChart`) — installed, not a dev-dependency.
-- `GET /api/sales/recent` returns a **zero-filled 30-day series** (recursive CTE) so days without sales render as zero-height bars; never returns fewer than 30 rows except on error.
+- Components live in `client/src/components/` (`StatsCards`, `ProductList`, `AddProductForm`, `SaleForm`, `SalesAnalytics`, `TopSellingParts`, `SalesHistory`).
+- All data is wired to the API: `App.jsx` fetches `GET /api/parts` + `GET /api/sales` (filtered rows) + `GET /api/sales/analytics` (summary + time series + top parts) in parallel on mount; `handleAddPart` does `POST /api/parts` then refetches. `handleLogSale` does `POST /api/sales` (server decrements stock), then refetches with the active filters applied. `SalesAnalytics` renders the summary cards (revenue, units, transactions, avg sale value), two Recharts `BarChart`s (revenue over time, units over time), and the top-selling parts list — all from the same `/api/sales/analytics` response. `SalesHistory` renders the filtered rows.
+- Sales filtering is **server-side**: `App.jsx` owns `salesQuery` (`{ search, range: all|today|week|month|custom, customFrom, customTo }`), maps it to `search`/`from`/`to` query params via `buildSalesParams()`, and refetches both `/api/sales` and `/api/sales/analytics` together on a 300 ms debounce (separate `historyLoading` so the layout doesn't flicker). `SalesAnalytics` shows the active scope in a pill (e.g. `12 sales · This week`). `this-week` = Monday → today; `this-month` = 1st → today. Chart granularity is `day` for spans ≤ 45 days, `month` beyond that.
+- `SalesAnalytics` uses **Recharts v3** (`BarChart`) — installed, not a dev-dependency.
 - Dashboard metrics (inventory value, total parts, low-stock count) are derived in `App.jsx` and rendered by `StatsCards`; only the parts list itself is fetched.
 - Tailwind v3 (config-based), not v4.
 
@@ -58,8 +57,8 @@ Base URL: `http://localhost:5001` (Vite proxies `/api` → `5001` in dev).
 - Data model is `parts` + `sales` (FK `sales.part_id → parts.id`) — **not** `products`/`product_id`; keep that naming everywhere.
 - The `parts` update route uses `COALESCE(?, col)` so partial updates don't violate `NOT NULL` on name/price.
 - Sales route must use a MySQL transaction (`SELECT ... FOR UPDATE` + decrement) — keep it that way.
-- `/api/sales/recent` must `GROUP BY` the **same** expression as the SELECT (`DATE_FORMAT`), or MySQL 8's `sql_mode=only_full_group_by` rejects it.
-- Don't `SELECT DATE(sold_at)` and JSON-serialize it — mysql2 turns `DATE` into a timezone-shifted JS Date. Use `DATE_FORMAT(sold_at, '%Y-%m-%d')` (returns a plain string) and the chart expecting `{ date: 'YYYY-MM-DD', total_quantity }`.
-- The zero-filled series uses a recursive CTE (`WITH RECURSIVE dates`) + `LEFT JOIN` on a `sold_at >= day AND sold_at < day + INTERVAL 1 DAY` range — keeps the 30-day guarantee and avoids `DATE()` in the join.
+- `GET /api/sales/analytics` timeseries must `GROUP BY` the CTE alias (`dates.day` or `months.m`) or the same `DATE_FORMAT` expression as the SELECT, or MySQL 8's `sql_mode=only_full_group_by` rejects it.
+- Don't `SELECT DATE(sold_at)` and JSON-serialize it — mysql2 turns `DATE` into a timezone-shifted JS Date. Use `DATE_FORMAT(sold_at, ...)` to return plain strings for series labels.
+- The zero-filled time series uses a recursive CTE (`WITH RECURSIVE dates`) + `LEFT JOIN` on a `sold_at >= day AND sold_at < day + INTERVAL 1 DAY` range (or months variant) — keeps every bucket present even on days/months without sales and avoids `DATE()` in the join.
 - DB credentials live in `server/.env` (gitignored) — never hardcode.
 - We're on Tailwind v3 (config-based), not v4.
