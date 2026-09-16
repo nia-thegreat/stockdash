@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import StatsCards from './components/StatsCards';
+import Dashboard from './components/Dashboard';
 import ProductList from './components/ProductList';
 import AddProductForm from './components/AddProductForm';
 import SaleForm from './components/SaleForm';
@@ -74,6 +74,9 @@ export default function App() {
   const [parts, setParts] = useState([]);
   const [salesHistory, setSalesHistory] = useState([]);
   const [analytics, setAnalytics] = useState(null);
+  const [dashboardAnalytics, setDashboardAnalytics] = useState(null);
+  const [overviewSeries, setOverviewSeries] = useState([]);
+  const [recentSalesPreview, setRecentSalesPreview] = useState([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activeSection, setActiveSection] = useState('dashboard');
   const [loading, setLoading] = useState(true);
@@ -125,18 +128,29 @@ export default function App() {
     return { history, analytics: analyticsData };
   }
 
-  // Fetch parts and filtered sales data in parallel
+  // Fetch parts, filtered sales data, and the Dashboard overview in parallel
   async function fetchData() {
     try {
       setLoading(true);
-      const [partsRes, salesData] = await Promise.all([
+      const today = new Date();
+      const seriesParams = {
+        from: toYMD(new Date(today.getTime() - 29 * 86400000)),
+        to: toYMD(today),
+      };
+      const [partsRes, filteredSales, dashAllTime, dashSeries, allRows] = await Promise.all([
         fetch('/api/parts'),
         fetchSalesData(buildSalesParams(salesQuery)),
+        fetchAnalytics({ bucket: 'month' }),
+        fetchAnalytics({ ...seriesParams, bucket: 'day' }),
+        fetchSales(),
       ]);
       if (!partsRes.ok) throw new Error('Could not load data');
       setParts(await partsRes.json());
-      setSalesHistory(salesData.history);
-      setAnalytics(salesData.analytics);
+      setSalesHistory(filteredSales.history);
+      setAnalytics(filteredSales.analytics);
+      setDashboardAnalytics(dashAllTime);
+      setOverviewSeries(dashSeries.timeseries);
+      setRecentSalesPreview(allRows.slice(0, 5));
       setError('');
       setHistoryError('');
     } catch (err) {
@@ -177,15 +191,17 @@ export default function App() {
     fetchData();
   }, []);
 
-  // Smooth-scroll to a section, highlight it, and close the mobile drawer
-  function handleNavClick(event, sectionId) {
-    event.preventDefault();
+  // Set a section active, close the mobile drawer, and smooth-scroll to it.
+  // Shared by the sidebar nav and the Dashboard quick actions.
+  function goToSection(sectionId) {
     setActiveSection(sectionId);
     setSidebarOpen(false);
-    const section = document.getElementById(sectionId);
-    if (section) {
-      section.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
+    document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function handleNavClick(event, sectionId) {
+    event.preventDefault();
+    goToSection(sectionId);
   }
 
   // Send POST /api/parts, then refresh
@@ -246,11 +262,8 @@ export default function App() {
     await fetchData();
   }
 
-  const inventoryValue = parts.reduce(
-    (sum, p) => sum + Number(p.price) * p.stock_quantity,
-    0
-  );
-  const lowStockCount = parts.filter((p) => p.stock_quantity < LOW_STOCK_THRESHOLD).length;
+  const totalRevenue = Number(dashboardAnalytics?.summary?.revenue) || 0;
+  const topParts = dashboardAnalytics?.topParts || [];
 
   return (
     <div className="h-dvh bg-gray-100 flex overflow-hidden">
@@ -322,10 +335,15 @@ export default function App() {
           )}
 
           <section id="dashboard" className="scroll-mt-16">
-            <StatsCards
-              inventoryValue={inventoryValue}
-              totalParts={parts.length}
-              lowStockCount={lowStockCount}
+            <Dashboard
+              parts={parts}
+              lowStockThreshold={LOW_STOCK_THRESHOLD}
+              loading={loading}
+              totalRevenue={totalRevenue}
+              overviewSeries={overviewSeries}
+              topParts={topParts}
+              recentSales={recentSalesPreview}
+              onNavigate={goToSection}
             />
           </section>
 

@@ -8,26 +8,7 @@ import {
   CartesianGrid,
   Tooltip,
 } from 'recharts';
-
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-function money(value) {
-  return `$${Number(value).toFixed(2)}`;
-}
-
-// Server labels: day 'YYYY-MM-DD' → '09/15'; month 'YYYY-MM' → 'Sep 2026'
-function formatSeriesLabel(label) {
-  const parts = String(label).split('-');
-  if (parts.length === 3) {
-    const [, m, d] = parts.map(Number);
-    return `${String(m).padStart(2, '0')}/${String(d).padStart(2, '0')}`;
-  }
-  if (parts.length === 2) {
-    const [y, m] = parts.map(Number);
-    return `${MONTHS[m - 1] || m} ${y}`;
-  }
-  return label;
-}
+import { money, formatSeriesLabel } from '../utils/format';
 
 const EMPTY = {
   summary: { revenue: 0, units_sold: 0, transactions: 0, avg_sale_value: 0 },

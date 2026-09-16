@@ -287,7 +287,7 @@ app.get('/api/sales/analytics', async (req, res) => {
         WITH RECURSIVE dates AS (
           SELECT ? AS day
           UNION ALL
-          SELECT day + INTERVAL 1 DAY FROM dates WHERE day < DATE_ADD(?, INTERVAL 1 DAY)
+          SELECT day + INTERVAL 1 DAY FROM dates WHERE day < ?
         )
         SELECT DATE_FORMAT(dates.day, '%Y-%m-%d') AS label,
                COALESCE(SUM(sales.quantity_sold), 0) AS quantity,

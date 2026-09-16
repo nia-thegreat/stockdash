@@ -1,34 +1,9 @@
 import { useState } from 'react';
-
-function money(value) {
-  return `$${Number(value).toFixed(2)}`;
-}
+import { money, formatSaleDate } from '../utils/format';
 
 // Unit price at the time of sale: total_amount ÷ quantity_sold
 function unitPrice(sale) {
   return sale.quantity_sold > 0 ? Number(sale.total_amount) / Number(sale.quantity_sold) : 0;
-}
-
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-// Reformat the frozen MySQL string 'YYYY-MM-DD HH:MM' without touching timezone math.
-function formatSaleDate(value) {
-  const [datePart, timePart] = typeof value === 'string' ? value.split(' ') : [null, null];
-  if (!datePart) return value;
-  const [y, m, d] = datePart.split('-').map(Number);
-  if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d) || !MONTHS[m - 1]) {
-    return value;
-  }
-  let time = '';
-  if (timePart) {
-    const [hh, mm] = timePart.split(':').map(Number);
-    if (Number.isInteger(hh) && Number.isInteger(mm)) {
-      const period = hh >= 12 ? 'PM' : 'AM';
-      const hour12 = hh % 12 === 0 ? 12 : hh % 12;
-      time = ` · ${hour12}:${String(mm).padStart(2, '0')} ${period}`;
-    }
-  }
-  return `${MONTHS[m - 1]} ${d}, ${y}${time}`;
 }
 
 const DATE_RANGES = [
