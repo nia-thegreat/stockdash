@@ -145,6 +145,23 @@ app.delete('/api/parts/:id', async (req, res) => {
   }
 });
 
+// Get all sales history with part names, newest first
+app.get('/api/sales', async (req, res) => {
+  try {
+    const [rows] = await pool.query(`
+      SELECT sales.id, sales.part_id, parts.name AS part_name,
+             sales.quantity_sold, sales.total_amount,
+             DATE_FORMAT(sales.sold_at, '%Y-%m-%d %H:%i') AS sold_at
+      FROM sales
+      JOIN parts ON parts.id = sales.part_id
+      ORDER BY sales.sold_at DESC, sales.id DESC
+    `);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+
 // Log a sale — transactional stock decrement
 app.post('/api/sales', async (req, res) => {
   const { part_id, quantity_sold } = req.body;

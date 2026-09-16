@@ -8,6 +8,8 @@ export default function SaleForm({ parts, onLogSale }) {
   const [error, setError] = useState('');
 
   const selectedPart = parts.find((p) => p.id === Number(partId));
+  const qty = parseInt(quantity, 10);
+  const total = selectedPart && !Number.isNaN(qty) && qty > 0 ? qty * Number(selectedPart.price) : null;
 
   function validate() {
     if (!selectedPart) return 'Select a part.';
@@ -72,6 +74,15 @@ export default function SaleForm({ parts, onLogSale }) {
           </select>
         </div>
 
+        {selectedPart && (
+          <div className="flex items-center justify-between rounded-md bg-gray-50 px-3 py-2 text-sm">
+            <span className="text-gray-500">Current stock</span>
+            <span className="font-semibold text-gray-900 tabular-nums">
+              {selectedPart.stock_quantity} units
+            </span>
+          </div>
+        )}
+
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Quantity Sold</label>
           <input
@@ -88,6 +99,17 @@ export default function SaleForm({ parts, onLogSale }) {
             placeholder="1"
           />
         </div>
+
+        {selectedPart && (
+          <div className="flex items-center justify-between rounded-md border border-gray-200 px-3 py-2 text-sm">
+            <span className="text-gray-500">
+              Total · {qty > 0 ? qty : 0} × ${Number(selectedPart.price).toFixed(2)}
+            </span>
+            <span className="font-semibold text-gray-900 tabular-nums">
+              ${total ? total.toFixed(2) : '0.00'}
+            </span>
+          </div>
+        )}
 
         <button
           type="submit"

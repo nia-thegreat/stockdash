@@ -3,6 +3,8 @@ import StatsCards from './components/StatsCards';
 import ProductList from './components/ProductList';
 import AddProductForm from './components/AddProductForm';
 import SaleForm from './components/SaleForm';
+import SalesSummary from './components/SalesSummary';
+import SalesHistory from './components/SalesHistory';
 import SalesChart from './components/SalesChart';
 
 const LOW_STOCK_THRESHOLD = 5;
@@ -16,24 +18,27 @@ const NAV_ITEMS = [
 
 export default function App() {
   const [parts, setParts] = useState([]);
-  const [sales, setSales] = useState([]);
+  const [recentSales, setRecentSales] = useState([]);
+  const [salesHistory, setSalesHistory] = useState([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activeSection, setActiveSection] = useState('dashboard');
   const mainRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  // Fetch all parts + recent sales from the API
+  // Fetch parts, recent sales (chart), and full sales history in parallel
   async function fetchData() {
     try {
       setLoading(true);
-      const [partsRes, salesRes] = await Promise.all([
+      const [partsRes, recentRes, historyRes] = await Promise.all([
         fetch('/api/parts'),
         fetch('/api/sales/recent'),
+        fetch('/api/sales'),
       ]);
-      if (!partsRes.ok || !salesRes.ok) throw new Error('Could not load data');
+      if (!partsRes.ok || !recentRes.ok || !historyRes.ok) throw new Error('Could not load data');
       setParts(await partsRes.json());
-      setSales(await salesRes.json());
+      setRecentSales(await recentRes.json());
+      setSalesHistory(await historyRes.json());
       setError('');
     } catch (err) {
       setError(err.message);
@@ -222,15 +227,25 @@ export default function App() {
             />
           </section>
 
-          <section id="sales" className="grid grid-cols-1 lg:grid-cols-2 gap-6 scroll-mt-16">
-            <SalesChart data={sales} loading={loading} />
-            <div className="space-y-6">
-              <AddProductForm onAddPart={handleAddPart} />
+          <section id="sales" className="space-y-6 scroll-mt-16">
+            <SalesSummary sales={salesHistory} loading={loading} />
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <SalesChart data={recentSales} loading={loading} />
               <SaleForm parts={parts} onLogSale={handleLogSale} />
             </div>
+
+            <SalesHistory
+              sales={salesHistory}
+              loading={loading}
+              error={error}
+              onRetry={fetchData}
+            />
           </section>
 
-          <section id="inventory" className="scroll-mt-16">
+          <section id="inventory" className="space-y-6 scroll-mt-16">
+            <AddProductForm onAddPart={handleAddPart} />
+
             <ProductList
               parts={parts}
               lowStockThreshold={LOW_STOCK_THRESHOLD}
