@@ -21,6 +21,60 @@ export function StockDashProvider({ children }) {
   const [salesQuery, setSalesQuery] = useState({ search: '', range: 'all', customFrom: '', customTo: '' });
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState('');
+  const [activities, setActivities] = useState([]);
+  const [activityCategory, setActivityCategory] = useState('all');
+  const [activityTotal, setActivityTotal] = useState(0);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [activityError, setActivityError] = useState('');
+
+  const ACTIVITY_PAGE = 20;
+
+  // Fetch the activity log (newest first) with server-side pagination.
+  // `replace` clears the list (filter changes); otherwise it appends ("Load more").
+  async function runActivitiesFetch(category, offset, mode) {
+    const qs = new URLSearchParams({ category, limit: String(ACTIVITY_PAGE), offset: String(offset) });
+    const res = await fetch(`/api/activities?${qs.toString()}`);
+    if (!res.ok) throw new Error('Could not load activity');
+    const data = await res.json();
+    if (mode === 'replace') {
+      setActivities(data.activities);
+    } else {
+      setActivities((prev) => [...prev, ...data.activities]);
+    }
+    setActivityTotal(data.total);
+    return data;
+  }
+
+  async function fetchActivities() {
+    setActivityLoading(true);
+    setActivityError('');
+    try {
+      await runActivitiesFetch(activityCategory, 0, 'replace');
+    } catch (err) {
+      setActivityError(err.message);
+    } finally {
+      setActivityLoading(false);
+    }
+  }
+
+  async function loadMoreActivities() {
+    setActivityError('');
+    try {
+      await runActivitiesFetch(activityCategory, activities.length, 'append');
+    } catch (err) {
+      setActivityError(err.message);
+    }
+  }
+
+  function changeActivityCategory(category) {
+    if (category === activityCategory) return;
+    setActivityCategory(category);
+    setActivityLoading(true);
+    setActivityError('');
+    runActivitiesFetch(category, 0, 'replace')
+      .catch((err) => setActivityError(err.message))
+      .finally(() => setActivityLoading(false));
+  }
 
   // Fetch sales history honoring the current filters (server-side filtering)
   async function fetchSales(params = {}) {
@@ -196,6 +250,13 @@ export function StockDashProvider({ children }) {
     await fetchData();
   }
 
+  // Keep the activity log fresh after any mutation (add/edit/delete/sale).
+  // Every mutation updates the parts list, so parts changes cover all of them.
+  useEffect(() => {
+    if (!loading) fetchActivities();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [parts]);
+
   const value = {
     parts,
     salesHistory,
@@ -209,6 +270,14 @@ export function StockDashProvider({ children }) {
     historyError,
     salesQuery,
     setSalesQuery,
+    activities,
+    activityCategory,
+    activityTotal,
+    activityLoading,
+    activityError,
+    changeActivityCategory,
+    loadMoreActivities,
+    fetchActivities,
     fetchData,
     handleAddPart,
     handleLogSale,

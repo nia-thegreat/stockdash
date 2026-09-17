@@ -7,6 +7,7 @@ const PAGE_TITLES = {
   '/dashboard': 'Dashboard',
   '/inventory': 'Inventory',
   '/sales': 'Sales',
+  '/activity': 'Activity',
   '/settings': 'Settings',
 };
 

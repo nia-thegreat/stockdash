@@ -25,6 +25,24 @@ CREATE TABLE IF NOT EXISTS sales (
   UNIQUE KEY idx_sales_invoice_number (invoice_number)
 );
 
+-- Activity log (append-only audit trail). entity_id intentionally has no FK so
+-- deleting a part does not erase its history; the part name is denormalized into
+-- description/details. actor is reserved for future authentication (no user
+-- accounts yet, so it defaults to 'system').
+CREATE TABLE IF NOT EXISTS activities (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  action_type VARCHAR(40) NOT NULL,
+  category ENUM('inventory', 'sales') NOT NULL,
+  entity_type VARCHAR(20) NOT NULL,
+  entity_id INT NULL,
+  description VARCHAR(255) NOT NULL,
+  details JSON NULL,
+  actor VARCHAR(100) NOT NULL DEFAULT 'system',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_activities_created (created_at),
+  INDEX idx_activities_category_created (category, created_at)
+);
+
 -- Seed data: parts
 INSERT INTO parts (name, stock_quantity, price) VALUES
 ('Oil Filter', 120, 12.99),
