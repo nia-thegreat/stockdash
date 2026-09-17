@@ -43,6 +43,16 @@ CREATE TABLE IF NOT EXISTS activities (
   INDEX idx_activities_category_created (category, created_at)
 );
 
+-- Application settings (single row). Stores the monthly-sales-goal
+-- configuration. No history is kept: a change applies going forward.
+CREATE TABLE IF NOT EXISTS settings (
+  id TINYINT PRIMARY KEY DEFAULT 1,
+  monthly_goal_enabled TINYINT(1) NOT NULL DEFAULT 0,
+  monthly_goal DECIMAL(12,2) NULL,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+INSERT IGNORE INTO settings (id) VALUES (1);
+
 -- Seed data: parts
 INSERT INTO parts (name, stock_quantity, price) VALUES
 ('Oil Filter', 120, 12.99),

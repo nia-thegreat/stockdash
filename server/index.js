@@ -318,6 +318,56 @@ app.get('/api/activities', async (req, res) => {
   }
 });
 
+// Application settings (single-row table). Exposes the monthly-sales-goal
+// configuration; other settings can be added here later. Read + update only.
+function toSettingsRow(row) {
+  return {
+    monthly_goal_enabled: Boolean(row?.monthly_goal_enabled),
+    monthly_goal: row?.monthly_goal === null || row?.monthly_goal === undefined ? null : Number(row.monthly_goal),
+  };
+}
+
+app.get('/api/settings', async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT monthly_goal_enabled, monthly_goal FROM settings WHERE id = 1');
+    res.json(toSettingsRow(rows[0]));
+  } catch (err) {
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+
+app.put('/api/settings', async (req, res) => {
+  const { monthly_goal_enabled, monthly_goal } = req.body;
+
+  if (typeof monthly_goal_enabled !== 'boolean') {
+    return res.status(400).json({ error: 'monthly_goal_enabled must be a boolean' });
+  }
+
+  // Goal is optional when disabled (kept for re-enabling later).
+  let goal = null;
+  if (monthly_goal !== undefined && monthly_goal !== null && monthly_goal !== '') {
+    goal = Number(monthly_goal);
+    if (!Number.isFinite(goal) || goal <= 0 || goal > 1000000000000) {
+      return res.status(400).json({ error: 'monthly_goal must be a number greater than 0' });
+    }
+    goal = Math.round(goal * 100) / 100;
+  }
+
+  if (monthly_goal_enabled && (goal === null || goal <= 0)) {
+    return res.status(400).json({ error: 'monthly_goal is required when goal tracking is enabled' });
+  }
+
+  try {
+    await pool.query(
+      'UPDATE settings SET monthly_goal_enabled = ?, monthly_goal = ? WHERE id = 1',
+      [monthly_goal_enabled ? 1 : 0, goal]
+    );
+    res.json({ monthly_goal_enabled, monthly_goal: goal });
+  } catch (err) {
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+
 // Shared helper: validate the sales query params (search/from/to) and build
 // the WHERE clause + parameters. Returns { error } or { whereSql, params }.
 // Used by both GET /api/sales and GET /api/sales/analytics so every metric

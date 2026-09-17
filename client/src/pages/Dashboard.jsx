@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import { useStockDash } from '../context/StockDashContext';
 import { LOW_STOCK_THRESHOLD } from '../utils/constants';
 import StatsCards from '../components/StatsCards';
+import MonthlyGoalCard from '../components/MonthlyGoalCard';
 import SalesOverviewChart from '../components/SalesOverviewChart';
 import TopSellingParts from '../components/TopSellingParts';
 import RecentSales from '../components/RecentSales';
@@ -9,7 +10,8 @@ import LowStockAlerts from '../components/LowStockAlerts';
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { parts, loading, dashboardAnalytics, overviewSeries, recentSalesPreview } = useStockDash();
+  const { parts, loading, dashboardAnalytics, overviewSeries, recentSalesPreview, settings, monthlyRevenue } =
+    useStockDash();
 
   const inventoryValue = parts.reduce((sum, p) => sum + Number(p.price) * p.stock_quantity, 0);
   const lowStockCount = parts.filter((p) => p.stock_quantity < LOW_STOCK_THRESHOLD).length;
@@ -52,6 +54,14 @@ export default function Dashboard() {
         lowStockCount={lowStockCount}
         totalRevenue={loading ? 0 : totalRevenue}
       />
+
+      {settings.monthly_goal_enabled && (
+        <MonthlyGoalCard
+          revenue={loading ? 0 : monthlyRevenue}
+          target={Number(settings.monthly_goal) || 0}
+          loading={loading}
+        />
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2">
