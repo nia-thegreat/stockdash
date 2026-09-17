@@ -4,6 +4,7 @@ const NAV_ITEMS = [
   { path: '/dashboard', label: 'Dashboard' },
   { path: '/inventory', label: 'Inventory' },
   { path: '/sales', label: 'Sales' },
+  { path: '/activity', label: 'Activity' },
   { path: '/settings', label: 'Settings' },
 ];
 

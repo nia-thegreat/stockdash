@@ -66,6 +66,18 @@ async function findDuplicatePart(candidateName, excludeId) {
   );
 }
 
+// Append an activity (audit) record. When called with a transaction connection
+// the activity commits or rolls back atomically with the mutation it describes
+// (used by sales). Outside a transaction it is best-effort: callers must never
+// let a logging failure masquerade as a failed/successful business action.
+async function logActivity(conn, entry) {
+  const { actionType, category, entityType, entityId = null, description, details = null } = entry;
+  await conn.query(
+    'INSERT INTO activities (action_type, category, entity_type, entity_id, description, details) VALUES (?, ?, ?, ?, ?, ?)',
+    [actionType, category, entityType, entityId, description, details === null ? null : JSON.stringify(details)]
+  );
+}
+
 // Add a new part
 app.post('/api/parts', async (req, res) => {
   const { name, stock_quantity, price, force } = req.body;
@@ -98,7 +110,23 @@ app.post('/api/parts', async (req, res) => {
       [name.trim(), stock_quantity, price]
     );
     const [rows] = await pool.query('SELECT * FROM parts WHERE id = ?', [result.insertId]);
-    res.status(201).json(rows[0]);
+    const created = rows[0];
+
+    // Log only after the insert succeeded; a logging failure must not fail the op
+    try {
+      await logActivity(pool, {
+        actionType: 'part_added',
+        category: 'inventory',
+        entityType: 'part',
+        entityId: created.id,
+        description: `Added ${created.name} to inventory — Stock: ${created.stock_quantity}`,
+        details: { name: created.name, stock_quantity: created.stock_quantity, price: Number(created.price) },
+      });
+    } catch (logErr) {
+      console.error('Activity log failed (part_added):', logErr.message);
+    }
+
+    res.status(201).json(created);
   } catch (err) {
     res.status(500).json({ error: 'Database error' });
   }
@@ -143,6 +171,12 @@ app.put('/api/parts/:id', async (req, res) => {
       }
     }
 
+    const [existingRows] = await pool.query('SELECT * FROM parts WHERE id = ?', [id]);
+    if (existingRows.length === 0) {
+      return res.status(404).json({ error: 'Part not found' });
+    }
+    const before = existingRows[0];
+
     const [result] = await pool.query(
       'UPDATE parts SET name = COALESCE(?, name), stock_quantity = COALESCE(?, stock_quantity), price = COALESCE(?, price) WHERE id = ?',
       [
@@ -158,7 +192,41 @@ app.put('/api/parts/:id', async (req, res) => {
     }
 
     const [rows] = await pool.query('SELECT * FROM parts WHERE id = ?', [id]);
-    res.json(rows[0]);
+    const after = rows[0];
+
+    // Record only real changes (an unchanged "edit" is a no-op, not an activity)
+    const changes = {};
+    if (name !== undefined && before.name !== after.name) {
+      changes.name = { from: before.name, to: after.name };
+    }
+    if (stock_quantity !== undefined && Number(before.stock_quantity) !== Number(after.stock_quantity)) {
+      changes.stock_quantity = { from: before.stock_quantity, to: after.stock_quantity };
+    }
+    if (price !== undefined && Number(before.price) !== Number(after.price)) {
+      changes.price = { from: Number(before.price), to: Number(after.price) };
+    }
+
+    if (Object.keys(changes).length > 0) {
+      const bits = [];
+      if (changes.name) bits.push(`renamed to ${after.name}`);
+      if (changes.stock_quantity) bits.push(`stock from ${changes.stock_quantity.from} to ${changes.stock_quantity.to}`);
+      if (changes.price) bits.push(`price from $${changes.price.from.toFixed(2)} to $${changes.price.to.toFixed(2)}`);
+
+      try {
+        await logActivity(pool, {
+          actionType: 'part_edited',
+          category: 'inventory',
+          entityType: 'part',
+          entityId: id,
+          description: `Updated ${after.name} — ${bits.join(', ')}`,
+          details: { name: after.name, changes },
+        });
+      } catch (logErr) {
+        console.error('Activity log failed (part_edited):', logErr.message);
+      }
+    }
+
+    res.json(after);
   } catch (err) {
     res.status(500).json({ error: 'Database error' });
   }
@@ -184,13 +252,67 @@ app.delete('/api/parts/:id', async (req, res) => {
       });
     }
 
+    const [partRows] = await pool.query('SELECT name FROM parts WHERE id = ?', [id]);
+    if (partRows.length === 0) {
+      return res.status(404).json({ error: 'Part not found' });
+    }
+
     const [result] = await pool.query('DELETE FROM parts WHERE id = ?', [id]);
 
     if (result.affectedRows === 0) {
       return res.status(404).json({ error: 'Part not found' });
     }
 
+    try {
+      await logActivity(pool, {
+        actionType: 'part_deleted',
+        category: 'inventory',
+        entityType: 'part',
+        entityId: id,
+        description: `Deleted ${partRows[0].name} from inventory`,
+        details: { name: partRows[0].name },
+      });
+    } catch (logErr) {
+      console.error('Activity log failed (part_deleted):', logErr.message);
+    }
+
     res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+
+// Activity log: read-only, newest first, with an optional category filter and
+// server-side pagination (limit capped so the list can never load unbounded).
+// There is deliberately no write endpoint — records are created by the backend.
+app.get('/api/activities', async (req, res) => {
+  const { category } = req.query;
+
+  if (category !== undefined && !['all', 'inventory', 'sales'].includes(category)) {
+    return res.status(400).json({ error: "category must be 'all', 'inventory' or 'sales'" });
+  }
+
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 100);
+  const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+
+  const filtered = category && category !== 'all';
+  const whereSql = filtered ? 'WHERE category = ?' : '';
+  const params = filtered ? [category] : [];
+
+  try {
+    const [[{ total }]] = await pool.query(
+      `SELECT COUNT(*) AS total FROM activities ${whereSql}`,
+      params
+    );
+    const [rows] = await pool.query(
+      `SELECT id, action_type, category, entity_type, entity_id, description, details,
+              DATE_FORMAT(created_at, '%Y-%m-%d %H:%i') AS created_at
+       FROM activities ${whereSql}
+       ORDER BY created_at DESC, id DESC
+       LIMIT ? OFFSET ?`,
+      [...params, limit, offset]
+    );
+    res.json({ activities: rows, total, limit, offset });
   } catch (err) {
     res.status(500).json({ error: 'Database error' });
   }
@@ -448,6 +570,25 @@ app.post('/api/sales', async (req, res) => {
       'INSERT INTO sales (part_id, quantity_sold, total_amount, invoice_number) VALUES (?, ?, ?, ?)',
       [part_id, quantity_sold, total_amount, invoice_number]
     );
+
+    // Activity is written on the SAME connection, before commit, so a failed or
+    // rolled-back sale can never leave a misleading "Sale recorded" entry.
+    await logActivity(conn, {
+      actionType: 'sale_recorded',
+      category: 'sales',
+      entityType: 'sale',
+      entityId: result.insertId,
+      description: `Sold ${quantity_sold} × ${part.name} — Total: $${total_amount.toFixed(2)}`,
+      details: {
+        part_id,
+        part_name: part.name,
+        quantity_sold,
+        total_amount,
+        invoice_number,
+        stock_before: part.stock_quantity,
+        stock_after: part.stock_quantity - quantity_sold,
+      },
+    });
 
     await conn.commit();
 
