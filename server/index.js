@@ -492,10 +492,15 @@ app.get('/api/sales/:id/invoice.pdf', async (req, res) => {
 
     const unitPrice = Number(sale.total_amount) / sale.quantity_sold;
     const money = (value) => `$${Number(value).toFixed(2)}`;
+    const items = [{ name: sale.part_name, qty: sale.quantity_sold, unit: unitPrice, total: Number(sale.total_amount) }];
 
-    const doc = new PDFDocument({ size: 'A4', margin: 48 });
+    const doc = new PDFDocument({ size: 'A4', margin: 50 });
+    const ink = '#111827';
     const blue = '#1d4ed8';
     const gray = '#6b7280';
+    const border = '#d1d5db';
+    const left = 50;
+    const right = 545;
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader(
@@ -506,64 +511,89 @@ app.get('/api/sales/:id/invoice.pdf', async (req, res) => {
     );
     doc.pipe(res);
 
-    // Logo/header area
-    doc.fillColor(blue).fontSize(26).font('Helvetica-Bold').text('StockDash', { continued: false });
-    doc.fillColor(gray).fontSize(10).font('Helvetica').text('Auto parts & accessories', 48, doc.y);
+    // --- Header ---------------------------------------------------------
+    doc.font('Helvetica-Bold').fontSize(24).fillColor(blue).text('StockDash', left, 50);
 
-    // INVOICE label (right)
-    doc.fontSize(24).font('Helvetica-Bold').fillColor('#111827')
-      .text('INVOICE', { align: 'right' });
+    // Right-aligned single-line helper — width is measured so long invoice
+    // numbers never wrap and never collide with adjacent lines.
+    const rightAt = (str, y) => {
+      const w = doc.widthOfString(str);
+      doc.text(str, right - w, y, { width: w, align: 'right', lineBreak: false });
+    };
 
-    // Supplier + invoice metadata block
-    const metaY = doc.y + 10;
-    doc.fillColor('#111827').fontSize(10).font('Helvetica-Bold').text('StockDash', 48, metaY);
-    doc.fillColor(gray).fontSize(9).font('Helvetica');
-    doc.text('123 Auto Parts Lane', 48, metaY + 13);
-    doc.text('Anytown, USA', 48, metaY + 24);
-    doc.text(`Invoice #: ${sale.invoice_number}`, { align: 'right' });
-    doc.text(`Date: ${sale.sold_at}`, { align: 'right' });
+    doc.fillColor(ink).font('Helvetica-Bold').fontSize(22);
+    rightAt('INVOICE', 50);
 
-    // Billed-to block (customer details come later; quick sales have no customer)
-    const billedY = doc.y + 24;
-    doc.fillColor(gray).fontSize(9).text('BILLED TO', 48, billedY);
-    doc.fillColor('#111827').fontSize(10).font('Helvetica-Bold').text('Walk-in customer', 48, billedY + 13);
+    doc.fillColor(gray).font('Helvetica').fontSize(9);
+    rightAt(`Invoice #: ${sale.invoice_number}`, 86);
+    rightAt(`Date: ${sale.sold_at}`, 100);
 
-    // Items table
-    const tableTop = doc.y + 28;
-    const colPart = 48;
-    const colQty = 340;
-    const colPrice = 420;
-    const colTotal = 505;
+    doc.moveTo(left, 128).lineTo(right, 128).strokeColor(border).lineWidth(1).stroke();
 
-    doc.fillColor('#111827').font('Helvetica-Bold').fontSize(9);
-    doc.text('PART', colPart, tableTop);
-    doc.text('QTY', colQty, tableTop);
-    doc.text('UNIT PRICE', colPrice, tableTop);
-    doc.text('TOTAL', colTotal, tableTop);
+    // --- Billing ---------------------------------------------------------
+    doc.fillColor(gray).fontSize(9).text('BILLED TO', left, 152);
+    doc.fillColor(ink).font('Helvetica-Bold').fontSize(12).text('Walk-in Customer', left, 168);
 
-    doc.moveTo(48, tableTop + 14).lineTo(547, tableTop + 14).strokeColor('#d1d5db').lineWidth(1).stroke();
+    // --- Items table (fixed columns, values right-aligned in their own column)
+    const columns = [
+      { x: 50, w: 250, header: 'PART', align: 'left' },
+      { x: 318, w: 52, header: 'QTY', align: 'right' },
+      { x: 384, w: 82, header: 'UNIT PRICE', align: 'right' },
+      { x: 480, w: 65, header: 'TOTAL', align: 'right' },
+    ];
+    const headerY = 220;
 
-    doc.fillColor('#111827').font('Helvetica').fontSize(10);
-    doc.text(sale.part_name, colPart, tableTop + 24);
-    doc.text(String(sale.quantity_sold), colQty, tableTop + 24);
-    doc.text(money(unitPrice), colPrice, tableTop + 24);
-    doc.text(money(sale.total_amount), colTotal, tableTop + 24);
+    const pageBottom = doc.page.height - 80;
+    // Keep the footer inside the bottom content margin so it never spills to a new page
+    const footerY = doc.page.height - 64;
+    let rowY = headerY + 24;
 
-    doc.moveTo(48, tableTop + 40).lineTo(547, tableTop + 40).strokeColor('#d1d5db').lineWidth(1).stroke();
+    const drawTableHeader = (y) => {
+      doc.fillColor(gray).font('Helvetica-Bold').fontSize(9);
+      columns.forEach((c) => doc.text(c.header, c.x, y, { width: c.w, align: c.align, lineBreak: false }));
+      doc.moveTo(left, y + 12).lineTo(right, y + 12).strokeColor(border).lineWidth(1).stroke();
+    };
 
-    // Totals
-    const totalsY = tableTop + 54;
-    doc.font('Helvetica').fontSize(10).fillColor('#111827');
-    doc.text('Subtotal', 460, totalsY, { align: 'right' });
-    doc.text(money(sale.total_amount), 505, totalsY);
-    doc.fontSize(12).font('Helvetica-Bold');
-    doc.text('Total', 460, totalsY + 18, { align: 'right' });
-    doc.text(money(sale.total_amount), 505, totalsY + 18);
+    drawTableHeader(headerY);
 
-    // Footer
+    doc.fillColor(ink).font('Helvetica').fontSize(10);
+    items.forEach((item) => {
+      const partHeight = doc.heightOfString(item.name, { width: 250 });
+      const rowH = Math.max(partHeight + 10, 22);
+
+      // Move to a new page automatically if the table outgrows the page
+      if (rowY + rowH + 60 > pageBottom) {
+        doc.addPage();
+        rowY = 70;
+        drawTableHeader(rowY);
+        rowY += 14;
+      }
+
+      doc.text(item.name, 50, rowY, { width: 250, lineBreak: true });
+      doc.font('Helvetica');
+      doc.text(String(item.qty), 318, rowY, { width: 52, align: 'right', lineBreak: false });
+      doc.text(money(item.unit), 384, rowY, { width: 82, align: 'right', lineBreak: false });
+      doc.text(money(item.total), 480, rowY, { width: 65, align: 'right', lineBreak: false });
+
+      doc.moveTo(left, rowY + rowH).lineTo(right, rowY + rowH).strokeColor(border).lineWidth(1).stroke();
+      rowY += rowH;
+    });
+
+    // --- Summary (labels end at 455, values end at 545 — no overlap) ------
+    const totalsY = rowY + 14;
+    doc.font('Helvetica').fontSize(10);
+    doc.text('Subtotal', 300, totalsY, { width: 155, align: 'right', lineBreak: false });
+    doc.fillColor(ink).text(money(sale.total_amount), 480, totalsY, { width: 65, align: 'right', lineBreak: false });
+
+    doc.moveTo(480, totalsY + 18).lineTo(right, totalsY + 18).strokeColor(border).lineWidth(1).stroke();
+
+    doc.font('Helvetica-Bold').fontSize(12);
+    doc.text('Total', 300, totalsY + 26, { width: 155, align: 'right', lineBreak: false });
+    doc.fillColor(ink).text(money(sale.total_amount), 480, totalsY + 26, { width: 65, align: 'right', lineBreak: false });
+
+    // --- Footer -----------------------------------------------------------
     doc.font('Helvetica').fontSize(9).fillColor(gray);
-    doc.text('Thank you for your business!', 48, 780, { align: 'center' });
-    doc.text('StockDash · Auto parts & accessories', 48, 794, { align: 'center' });
+    doc.text('Thank you for your business!', 50, footerY, { width: 495, align: 'center' });
 
     doc.end();
   } catch (err) {
