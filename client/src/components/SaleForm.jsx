@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { openInvoice, downloadInvoice } from '../utils/invoice';
 
 export default function SaleForm({ parts, onLogSale }) {
   const [partId, setPartId] = useState('');
@@ -23,24 +24,18 @@ export default function SaleForm({ parts, onLogSale }) {
 
   function handleViewInvoice() {
     if (completedSale) {
-      window.open(`/api/sales/${completedSale.id}/invoice.pdf`, '_blank');
+      try {
+        openInvoice(completedSale.id);
+      } catch (err) {
+        setError(err.message);
+      }
     }
   }
 
   async function handleDownloadInvoice() {
     if (!completedSale) return;
     try {
-      const res = await fetch(`/api/sales/${completedSale.id}/invoice.pdf?download=1`);
-      if (!res.ok) throw new Error('Could not download invoice');
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `invoice-${completedSale.invoice_number}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      await downloadInvoice(completedSale.id, completedSale.invoice_number);
     } catch (err) {
       setError(err.message);
     }

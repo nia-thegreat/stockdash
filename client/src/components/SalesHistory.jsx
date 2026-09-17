@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { money, formatSaleDate } from '../utils/format';
+import { openInvoice, downloadInvoice } from '../utils/invoice';
 
 // Unit price at the time of sale: total_amount ÷ quantity_sold
 function unitPrice(sale) {
@@ -16,6 +17,7 @@ const DATE_RANGES = [
 
 export default function SalesHistory({ sales, loading, error, onRetry, filters, onFilterChange }) {
   const [retrying, setRetrying] = useState(false);
+  const [invoiceError, setInvoiceError] = useState('');
 
   const hasFilters = filters.search.trim() !== '' || filters.range !== 'all';
   const invalidCustom =
@@ -32,6 +34,26 @@ export default function SalesHistory({ sales, loading, error, onRetry, filters, 
   function retry() {
     setRetrying(true);
     Promise.resolve(onRetry()).then(() => setRetrying(false));
+  }
+
+  function runInvoiceAction(action) {
+    setInvoiceError('');
+    try {
+      return action();
+    } catch (err) {
+      setInvoiceError(err.message || 'Could not open the invoice. Please try again.');
+      return null;
+    }
+  }
+
+  function handleViewInvoice(sale) {
+    runInvoiceAction(() => openInvoice(sale.id));
+  }
+
+  function handleDownloadInvoice(sale) {
+    runInvoiceAction(() => downloadInvoice(sale.id, sale.invoice_number)).catch((err) =>
+      setInvoiceError(err.message || 'Could not download the invoice. Please try again.')
+    );
   }
 
   return (
@@ -146,6 +168,20 @@ export default function SalesHistory({ sales, loading, error, onRetry, filters, 
         )}
       </div>
 
+      {invoiceError && (
+        <div className="border-b border-red-100 bg-red-50 px-5 py-3 flex items-center gap-2 text-sm text-red-700">
+          <svg className="h-4 w-4 text-red-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M12 9v2m0 4h.01m-6.9 5h13.8a2 2 0 001.4-3.4l-6.9-6.9a2 2 0 00-2.8 0l-6.9 6.9a2 2 0 001.4 3.4z"
+            />
+          </svg>
+          <span>{invoiceError}</span>
+        </div>
+      )}
+
       {/* Body: loading / error / empty / rows */}
       {loading ? (
         <SalesHistorySkeleton />
@@ -218,7 +254,7 @@ export default function SalesHistory({ sales, loading, error, onRetry, filters, 
         <>
           {/* Desktop table */}
           <div className="hidden md:block overflow-x-auto">
-            <table className="w-full text-sm min-w-[640px]">
+            <table className="w-full text-sm min-w-[720px]">
               <thead>
                 <tr className="text-left text-xs font-semibold uppercase tracking-wide text-gray-500 border-b">
                   <th className="px-5 py-3 font-semibold">Date</th>
@@ -226,6 +262,7 @@ export default function SalesHistory({ sales, loading, error, onRetry, filters, 
                   <th className="px-5 py-3 font-semibold text-right">Qty</th>
                   <th className="px-5 py-3 font-semibold text-right">Unit Price</th>
                   <th className="px-5 py-3 font-semibold text-right">Total</th>
+                  <th className="px-5 py-3 font-semibold text-right">Invoice</th>
                 </tr>
               </thead>
               <tbody>
@@ -237,6 +274,9 @@ export default function SalesHistory({ sales, loading, error, onRetry, filters, 
                     <td className="px-5 py-3.5 text-right tabular-nums text-gray-700">{money(unitPrice(s))}</td>
                     <td className="px-5 py-3.5 text-right tabular-nums font-medium text-gray-900">
                       {money(s.total_amount)}
+                    </td>
+                    <td className="px-5 py-3.5 text-right whitespace-nowrap">
+                      <InvoiceActions sale={s} onView={handleViewInvoice} onDownload={handleDownloadInvoice} />
                     </td>
                   </tr>
                 ))}
@@ -255,9 +295,12 @@ export default function SalesHistory({ sales, loading, error, onRetry, filters, 
                   </div>
                   <p className="text-sm font-semibold text-gray-900 tabular-nums">{money(s.total_amount)}</p>
                 </div>
-                <div className="mt-2 flex items-center justify-between text-xs text-gray-500">
+                <div className="mt-2 flex items-center justify-between gap-2 text-xs text-gray-500">
                   <span className="tabular-nums">{s.quantity_sold} units sold</span>
                   <span className="tabular-nums">{money(unitPrice(s))} each</span>
+                </div>
+                <div className="mt-2 flex justify-end">
+                  <InvoiceActions sale={s} onView={handleViewInvoice} onDownload={handleDownloadInvoice} />
                 </div>
               </div>
             ))}
@@ -265,6 +308,50 @@ export default function SalesHistory({ sales, loading, error, onRetry, filters, 
         </>
       )}
     </div>
+  );
+}
+
+function InvoiceActions({ sale, onView, onDownload }) {
+  if (!sale.invoice_number) {
+    return <span className="inline-block w-5 text-center text-gray-300" title="No invoice">—</span>;
+  }
+  const btn =
+    'inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-500 hover:text-blue-600 hover:bg-blue-50 transition-colors';
+  return (
+    <span className="inline-flex items-center gap-1">
+      <button
+        type="button"
+        onClick={() => onView(sale)}
+        aria-label={`View invoice ${sale.invoice_number}`}
+        title="View invoice"
+        className={btn}
+      >
+        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+          />
+        </svg>
+      </button>
+      <button
+        type="button"
+        onClick={() => onDownload(sale)}
+        aria-label={`Download invoice ${sale.invoice_number}`}
+        title="Download PDF"
+        className={btn}
+      >
+        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+          />
+        </svg>
+      </button>
+    </span>
   );
 }
 

@@ -254,7 +254,7 @@ app.get('/api/sales', async (req, res) => {
   try {
     const [rows] = await pool.query(`
       SELECT sales.id, sales.part_id, parts.name AS part_name,
-             sales.quantity_sold, sales.total_amount,
+             sales.quantity_sold, sales.total_amount, sales.invoice_number,
              DATE_FORMAT(sales.sold_at, '%Y-%m-%d %H:%i') AS sold_at
       FROM sales
       JOIN parts ON parts.id = sales.part_id
