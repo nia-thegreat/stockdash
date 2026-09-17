@@ -1,6 +1,8 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const crypto = require('crypto');
+const PDFDocument = require('pdfkit');
 const pool = require('./db');
 
 const app = express();
@@ -440,10 +442,11 @@ app.post('/api/sales', async (req, res) => {
       [quantity_sold, part_id]
     );
 
-    // Record the sale
+    // Record the sale with its unique invoice number
+    const invoice_number = `INV-${crypto.randomUUID()}`;
     const [result] = await conn.query(
-      'INSERT INTO sales (part_id, quantity_sold, total_amount) VALUES (?, ?, ?)',
-      [part_id, quantity_sold, total_amount]
+      'INSERT INTO sales (part_id, quantity_sold, total_amount, invoice_number) VALUES (?, ?, ?, ?)',
+      [part_id, quantity_sold, total_amount, invoice_number]
     );
 
     await conn.commit();
@@ -455,6 +458,116 @@ app.post('/api/sales', async (req, res) => {
     res.status(500).json({ error: 'Database error' });
   } finally {
     conn.release();
+  }
+});
+
+// PDF invoice for a sale — generated server-side from the stored sale data so
+// old invoices always reflect the price recorded at the time of the sale.
+app.get('/api/sales/:id/invoice.pdf', async (req, res) => {
+  const id = Number(req.params.id);
+
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ error: 'Invalid sale ID' });
+  }
+
+  try {
+    const [rows] = await pool.query(`
+      SELECT sales.id, sales.quantity_sold, sales.total_amount,
+             sales.invoice_number,
+             DATE_FORMAT(sales.sold_at, '%Y-%m-%d %H:%i:%s') AS sold_at,
+             parts.name AS part_name
+      FROM sales
+      JOIN parts ON parts.id = sales.part_id
+      WHERE sales.id = ?
+    `, [id]);
+
+    const sale = rows[0];
+    if (!sale) {
+      return res.status(404).json({ error: 'Sale not found' });
+    }
+    // Sales recorded before invoices existed have no number and no invoice
+    if (!sale.invoice_number) {
+      return res.status(404).json({ error: 'No invoice for this sale' });
+    }
+
+    const unitPrice = Number(sale.total_amount) / sale.quantity_sold;
+    const money = (value) => `$${Number(value).toFixed(2)}`;
+
+    const doc = new PDFDocument({ size: 'A4', margin: 48 });
+    const blue = '#1d4ed8';
+    const gray = '#6b7280';
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      req.query.download === '1'
+        ? `attachment; filename="invoice-${sale.invoice_number.substring(4)}.pdf"`
+        : 'inline'
+    );
+    doc.pipe(res);
+
+    // Logo/header area
+    doc.fillColor(blue).fontSize(26).font('Helvetica-Bold').text('StockDash', { continued: false });
+    doc.fillColor(gray).fontSize(10).font('Helvetica').text('Auto parts & accessories', 48, doc.y);
+
+    // INVOICE label (right)
+    doc.fontSize(24).font('Helvetica-Bold').fillColor('#111827')
+      .text('INVOICE', { align: 'right' });
+
+    // Supplier + invoice metadata block
+    const metaY = doc.y + 10;
+    doc.fillColor('#111827').fontSize(10).font('Helvetica-Bold').text('StockDash', 48, metaY);
+    doc.fillColor(gray).fontSize(9).font('Helvetica');
+    doc.text('123 Auto Parts Lane', 48, metaY + 13);
+    doc.text('Anytown, USA', 48, metaY + 24);
+    doc.text(`Invoice #: ${sale.invoice_number}`, { align: 'right' });
+    doc.text(`Date: ${sale.sold_at}`, { align: 'right' });
+
+    // Billed-to block (customer details come later; quick sales have no customer)
+    const billedY = doc.y + 24;
+    doc.fillColor(gray).fontSize(9).text('BILLED TO', 48, billedY);
+    doc.fillColor('#111827').fontSize(10).font('Helvetica-Bold').text('Walk-in customer', 48, billedY + 13);
+
+    // Items table
+    const tableTop = doc.y + 28;
+    const colPart = 48;
+    const colQty = 340;
+    const colPrice = 420;
+    const colTotal = 505;
+
+    doc.fillColor('#111827').font('Helvetica-Bold').fontSize(9);
+    doc.text('PART', colPart, tableTop);
+    doc.text('QTY', colQty, tableTop);
+    doc.text('UNIT PRICE', colPrice, tableTop);
+    doc.text('TOTAL', colTotal, tableTop);
+
+    doc.moveTo(48, tableTop + 14).lineTo(547, tableTop + 14).strokeColor('#d1d5db').lineWidth(1).stroke();
+
+    doc.fillColor('#111827').font('Helvetica').fontSize(10);
+    doc.text(sale.part_name, colPart, tableTop + 24);
+    doc.text(String(sale.quantity_sold), colQty, tableTop + 24);
+    doc.text(money(unitPrice), colPrice, tableTop + 24);
+    doc.text(money(sale.total_amount), colTotal, tableTop + 24);
+
+    doc.moveTo(48, tableTop + 40).lineTo(547, tableTop + 40).strokeColor('#d1d5db').lineWidth(1).stroke();
+
+    // Totals
+    const totalsY = tableTop + 54;
+    doc.font('Helvetica').fontSize(10).fillColor('#111827');
+    doc.text('Subtotal', 460, totalsY, { align: 'right' });
+    doc.text(money(sale.total_amount), 505, totalsY);
+    doc.fontSize(12).font('Helvetica-Bold');
+    doc.text('Total', 460, totalsY + 18, { align: 'right' });
+    doc.text(money(sale.total_amount), 505, totalsY + 18);
+
+    // Footer
+    doc.font('Helvetica').fontSize(9).fillColor(gray);
+    doc.text('Thank you for your business!', 48, 780, { align: 'center' });
+    doc.text('StockDash · Auto parts & accessories', 48, 794, { align: 'center' });
+
+    doc.end();
+  } catch (err) {
+    res.status(500).json({ error: 'Database error' });
   }
 });
 

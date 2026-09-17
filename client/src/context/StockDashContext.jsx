@@ -147,7 +147,8 @@ export function StockDashProvider({ children }) {
     await fetchData();
   }
 
-  // Send POST /api/sales (server decrements stock), then refresh
+  // Send POST /api/sales (server decrements stock), then refresh.
+  // Returns the created sale row (id + invoice_number) for the success UI.
   async function handleLogSale(sale) {
     setError('');
     const res = await fetch('/api/sales', {
@@ -159,7 +160,9 @@ export function StockDashProvider({ children }) {
     if (!res.ok) {
       throw new Error(data.error || 'Failed to log sale');
     }
+    const createdSale = data;
     await fetchData();
+    return createdSale;
   }
 
   // Send PUT /api/parts/:id, then refresh. `options.force` skips the server's

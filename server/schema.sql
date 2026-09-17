@@ -19,8 +19,10 @@ CREATE TABLE IF NOT EXISTS sales (
   part_id INT NOT NULL,
   quantity_sold INT NOT NULL,
   total_amount DECIMAL(10, 2) NOT NULL,
+  invoice_number VARCHAR(40) NULL,
   sold_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE
+  FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE,
+  UNIQUE KEY idx_sales_invoice_number (invoice_number)
 );
 
 -- Seed data: parts

@@ -4,7 +4,7 @@ export default function SaleForm({ parts, onLogSale }) {
   const [partId, setPartId] = useState('');
   const [quantity, setQuantity] = useState('');
   const [saving, setSaving] = useState(false);
-  const [success, setSuccess] = useState(false);
+  const [completedSale, setCompletedSale] = useState(null);
   const [error, setError] = useState('');
 
   const selectedPart = parts.find((p) => p.id === Number(partId));
@@ -21,6 +21,31 @@ export default function SaleForm({ parts, onLogSale }) {
     return '';
   }
 
+  function handleViewInvoice() {
+    if (completedSale) {
+      window.open(`/api/sales/${completedSale.id}/invoice.pdf`, '_blank');
+    }
+  }
+
+  async function handleDownloadInvoice() {
+    if (!completedSale) return;
+    try {
+      const res = await fetch(`/api/sales/${completedSale.id}/invoice.pdf?download=1`);
+      if (!res.ok) throw new Error('Could not download invoice');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `invoice-${completedSale.invoice_number}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
   async function handleSubmit(e) {
     e.preventDefault();
     const message = validate();
@@ -30,16 +55,19 @@ export default function SaleForm({ parts, onLogSale }) {
     }
     setSaving(true);
     setError('');
-    setSuccess(false);
+    setCompletedSale(null);
 
     try {
-      await onLogSale({
+      const created = await onLogSale({
         part_id: parseInt(partId, 10),
         quantity_sold: parseInt(quantity, 10),
       });
       setPartId('');
       setQuantity('');
-      setSuccess(true);
+      setCompletedSale({
+        id: created.id,
+        invoice_number: created.invoice_number,
+      });
     } catch (err) {
       setError(err.message);
     } finally {
@@ -59,7 +87,7 @@ export default function SaleForm({ parts, onLogSale }) {
             onChange={(e) => {
               setPartId(e.target.value);
               setError('');
-              setSuccess(false);
+              setCompletedSale(null);
             }}
             className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
           >
@@ -93,7 +121,7 @@ export default function SaleForm({ parts, onLogSale }) {
             onChange={(e) => {
               setQuantity(e.target.value);
               setError('');
-              setSuccess(false);
+              setCompletedSale(null);
             }}
             className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             placeholder="1"
@@ -119,7 +147,38 @@ export default function SaleForm({ parts, onLogSale }) {
           {saving ? 'Logging...' : 'Log Sale'}
         </button>
 
-        {success && <p className="text-sm text-green-600">Sale logged</p>}
+        {completedSale && (
+          <div className="rounded-md bg-green-50 border border-green-200 p-4">
+            <div className="flex items-start gap-3">
+              <svg className="h-5 w-5 text-green-600 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-green-800">Sale completed successfully</p>
+                <p className="text-sm text-green-700 mt-1 break-all">
+                  Invoice: <span className="font-medium">{completedSale.invoice_number}</span>
+                </p>
+                <div className="mt-3 flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    onClick={handleViewInvoice}
+                    className="px-3 py-1.5 rounded-md bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors"
+                  >
+                    View Invoice
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDownloadInvoice}
+                    className="px-3 py-1.5 rounded-md bg-white text-blue-700 text-sm font-medium ring-1 ring-inset ring-blue-300 hover:bg-blue-50 transition-colors"
+                  >
+                    Download PDF
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {error && <p className="text-sm text-red-600">{error}</p>}
       </form>
     </div>
