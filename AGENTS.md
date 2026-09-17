@@ -31,6 +31,14 @@ mysql -u root -p < server/schema.sql   # creates inventory_db + tables + seed da
 #     INDEX idx_activities_created (created_at),
 #     INDEX idx_activities_category_created (category, created_at)
 #   );
+# Existing databases created before the settings feature need this one-time migration:
+#   CREATE TABLE IF NOT EXISTS settings (
+#     id TINYINT PRIMARY KEY DEFAULT 1,
+#     monthly_goal_enabled TINYINT(1) NOT NULL DEFAULT 0,
+#     monthly_goal DECIMAL(12,2) NULL,
+#     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+#   );
+#   INSERT IGNORE INTO settings (id) VALUES (1);
 
 # 3. Configure environment
 cp server/.env.example server/.env    # then edit DB_PASSWORD etc.
@@ -61,6 +69,8 @@ Base URL: `http://localhost:5001` (Vite proxies `/api` → `5001` in dev).
 | GET    | `/api/sales`      | Sales with `part_name` (JOIN parts), `sold_at` as `DATE_FORMAT('%Y-%m-%d %H:%i')` string, newest first. Optional server-side filters: `search` (LIKE part name), `from`/`to` (YYYY-MM-DD, inclusive range). |
 | GET    | `/api/sales/analytics` | Filtered aggregates, zero-filled time series (day/month buckets), and top 5 parts. Params: `search`, `from`, `to`, `bucket=day|month`. Returns `{ summary, timeseries, topParts }` |
 | GET    | `/api/activities` | Append-only activity/audit log, newest first. Params: `category=all|inventory|sales` (default `all`), `limit` (default 20, max 100), `offset`. Returns `{ activities, total, limit, offset }`. **Read-only** — records are written only by the backend after a successful mutation (part add/edit/delete, sale). `part_edited` details capture `changes` (name/stock/price from→to); `sale_recorded` details carry quantity/total/`invoice_number`/stock before+after. No write/delete endpoint exists. |
+| GET    | `/api/settings` | App settings from the single-row `settings` table: `{ monthly_goal_enabled: boolean, monthly_goal: number\|null }` |
+| PUT    | `/api/settings` | Update settings. Validates: `monthly_goal_enabled` must be boolean; when enabling, `monthly_goal` must be a finite number > 0 (≤ 1e12, rounded to cents) or it returns **400**; disabling may send a null goal. Returns the saved shape. Changes are NOT written to the activity log (settings are configuration, not business actions). |
 
 ## Frontend
 
@@ -71,6 +81,7 @@ Base URL: `http://localhost:5001` (Vite proxies `/api` → `5001` in dev).
 - `SalesAnalytics` + `SalesOverviewChart` use **Recharts v3** (`BarChart`) — installed, not a dev-dependency.
 - Invoices: `POST /api/sales` returns the sale row including its `INV-<uuid>` `invoice_number`; `handleLogSale` returns that row to `SaleForm`, which shows a success card with **View Invoice** (`window.open('/api/sales/<id>/invoice.pdf')`) and **Download PDF** (fetch blob → programmatic download via `?download=1`). PDFs are generated server-side with `pdfkit` from stored rows (`total_amount`) so old invoices keep the price recorded at sale time.
 - Dashboard metrics (inventory value, total parts, low-stock count) are derived in `src/pages/Dashboard.jsx` and rendered by `StatsCards`; `LOW_STOCK_THRESHOLD` lives in `src/utils/constants.js`; only the parts list itself is fetched.
+- **Monthly sales goal**: `GET/PUT /api/settings` back a single-row `settings` table (goal enabled bool + target). `StockDashContext` holds `settings` + `monthlyRevenue` (current **calendar month** revenue, computed by calling the existing `/api/sales/analytics` with `from=<1st of month>&to=<today>`, `bucket=day` — no duplicated sales math, refreshed on every mutation). Dashboard renders `src/components/MonthlyGoalCard.jsx` only when `monthly_goal_enabled`; it derives `pct = revenue/target*100`, `remaining = max(target - revenue, 0)`, and a time-aware status (green `≥ 100%` or on-track vs % of month elapsed, amber slightly behind, red behind). `src/pages/Settings.jsx` is the toggle + target form (status messages, disabled input when off). No goal history is stored; changing the target applies going forward.
 - **Activity history**: `src/pages/Activity.jsx` renders `src/components/ActivityHistory.jsx` (compact timeline cards + All/Inventory/Sales pills + "Load more" pagination). Data lives in `StockDashContext` (`activities`, `activityCategory`, `activityTotal`, fetch/load-more/category-change) and refreshes automatically after mutations. Timestamps reuse `formatSaleDate`. **Read-only UI** — there is no way to edit/delete activities.
 - **Duplicate part detection**: `server/index.js` normalizes names (trim → lowercase → collapse whitespace → sorted words) and returns **409** `{ error, duplicate: { id, name, stock_quantity } }` from `POST /api/parts` and `PUT /api/parts/:id` (edit excludes itself) when a match exists. Advisory only — clients resend with `force: true` to bypass ("Add Anyway"). The frontend normalizes with the same logic in `src/utils/duplicates.js`; warning panels live in `AddProductForm` and `EditPartModal`. No DB constraint (intentional duplicates allowed).
 - Tailwind v3 (config-based), not v4.

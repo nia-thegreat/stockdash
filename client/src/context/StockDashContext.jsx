@@ -26,6 +26,8 @@ export function StockDashProvider({ children }) {
   const [activityTotal, setActivityTotal] = useState(0);
   const [activityLoading, setActivityLoading] = useState(false);
   const [activityError, setActivityError] = useState('');
+  const [settings, setSettings] = useState({ monthly_goal_enabled: false, monthly_goal: null });
+  const [monthlyRevenue, setMonthlyRevenue] = useState(0);
 
   const ACTIVITY_PAGE = 20;
 
@@ -119,7 +121,9 @@ export function StockDashProvider({ children }) {
     return { history, analytics: analyticsData };
   }
 
-  // Fetch parts, filtered sales data, and the Dashboard overview in parallel
+  // Fetch parts, filtered sales data, the Dashboard overview, app settings, and
+  // this calendar month's revenue in parallel. The month window reuses the same
+  // analytics query as everything else (no duplicated sales math).
   async function fetchData() {
     try {
       setLoading(true);
@@ -128,12 +132,16 @@ export function StockDashProvider({ children }) {
         from: toYMD(new Date(today.getTime() - 29 * 86400000)),
         to: toYMD(today),
       };
-      const [partsRes, filteredSales, dashAllTime, dashSeries, allRows] = await Promise.all([
+      const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+      const monthParams = { from: toYMD(monthStart), to: toYMD(today), bucket: 'day' };
+      const [partsRes, filteredSales, dashAllTime, dashSeries, allRows, settingsRes, monthlyAnalytics] = await Promise.all([
         fetch('/api/parts'),
         fetchSalesData(buildSalesParams(salesQuery)),
         fetchAnalytics({ bucket: 'month' }),
         fetchAnalytics({ ...seriesParams, bucket: 'day' }),
         fetchSales(),
+        fetch('/api/settings'),
+        fetchAnalytics(monthParams),
       ]);
       if (!partsRes.ok) throw new Error('Could not load data');
       setParts(await partsRes.json());
@@ -142,6 +150,8 @@ export function StockDashProvider({ children }) {
       setDashboardAnalytics(dashAllTime);
       setOverviewSeries(dashSeries.timeseries);
       setRecentSalesPreview(allRows.slice(0, 5));
+      if (settingsRes.ok) setSettings(await settingsRes.json());
+      setMonthlyRevenue(Number(monthlyAnalytics?.summary?.revenue) || 0);
       setError('');
       setHistoryError('');
     } catch (err) {
@@ -250,6 +260,23 @@ export function StockDashProvider({ children }) {
     await fetchData();
   }
 
+  // Save the monthly-sales-goal settings, then refresh (gets fresh monthly revenue)
+  async function handleUpdateSettings(updates) {
+    setError('');
+    const res = await fetch('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to save settings');
+    }
+    setSettings(data);
+    await fetchData();
+    return data;
+  }
+
   // Keep the activity log fresh after any mutation (add/edit/delete/sale).
   // Every mutation updates the parts list, so parts changes cover all of them.
   useEffect(() => {
@@ -278,6 +305,9 @@ export function StockDashProvider({ children }) {
     changeActivityCategory,
     loadMoreActivities,
     fetchActivities,
+    settings,
+    monthlyRevenue,
+    handleUpdateSettings,
     fetchData,
     handleAddPart,
     handleLogSale,
